@@ -9,7 +9,7 @@ reproduced below as required.
 - Component: PCRE2 — Perl Compatible Regular Expressions, 8-bit library
 - Version: 10.46 (system package `libpcre2-8-0` / `libpcre2-dev`)
 - Homepage: https://www.pcre.org/ — source: https://github.com/PCRE2Project/pcre2
-- Usage: dynamically linked by libsx for the `sx_reg_*` regex API
+- Usage: dynamically linked by libstringx for the `sx_reg_*` regex API
   (`sx_reg_compile` / `sx_reg_match*` / `sx_reg_replace*` / `sx_reg_split`).
 - License: BSD 3-Clause (reproduced below)
 

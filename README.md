@@ -2,7 +2,7 @@
 
 A small C string library with a **single-header API** and a byte-exact,
 zero-copy view model.  Version **v0.5**.  The library itself is built and
-linked as **libsx** (`-lsx`); the project lives at
+linked as **libstringx** (`-lstringx`); the project lives at
 [github.com/minelogy-dev/StringX](https://github.com/minelogy-dev/StringX).
 
 To use it you only need:
@@ -11,7 +11,7 @@ To use it you only need:
 #include <sx.h>
 ```
 
-and link `-lsx` — one header, one library.
+and link `-lstringx` — one header, one library.
 
 ## Design
 
@@ -36,13 +36,13 @@ and link `-lsx` — one header, one library.
 - The `forge` build tool to build from source (https://github.com/minelogy-dev/forge —
   a custom build system; the tool compiles `build.c` into a local `./make` entry)
 - `libpcre2-dev` (PCRE2 8-bit) — the regex layer's dependency; the shared
-  library links `pcre2-8` itself, so consumers only need `-lsx`
+  library links `pcre2-8` itself, so consumers only need `-lstringx`
 
 ## Build
 
 ```sh
 forge .        # compile build.c into ./make (re-run whenever build.c changes)
-./make         # build -> build/output/libsx.so (+ headers at build/output/include)
+./make         # build -> build/output/libstringx.so (+ headers at build/output/include)
 ./make test    # build and run every test under tests/ (ASan + UBSan)
 ```
 
@@ -67,7 +67,7 @@ int main(void) {
 Compile with:
 
 ```sh
-cc app.c -I<path-to-include> -L<path-to-lib> -lsx
+cc app.c -I<path-to-include> -L<path-to-lib> -lstringx
 ```
 
 ## Regex (advanced layer: `sx_reg_*`)

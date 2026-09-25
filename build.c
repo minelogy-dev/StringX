@@ -22,7 +22,7 @@
 
 function(check) {
   parse_args(builtin_args);
-  target("sx") {
+  target("stringx") {
     add_sources_r("src");
     set_type(FORGE_SHARED_LIB);
     add_include_path("include");
@@ -64,7 +64,7 @@ function(build) {
       free(names[i]);
     free(names);
   }
-  target("sx") {
+  target("stringx") {
     add_sources_r("src");
     set_type(FORGE_SHARED_LIB);
     add_include_path("include");
@@ -84,7 +84,7 @@ function(build) {
  * artifacts (shared library, headers, license/notices) under a
  * prefix; gen_deb stages the same tree into a Debian package built
  * with tar/ar (no dpkg-deb dependency),
- * build/deb/libsx_<ver>_<arch>.deb.
+ * build/deb/libstringx_<ver>_<arch>.deb.
  * Effective only on Linux (guarded by the LINUX compile-time macro
  * from build.h); elsewhere the function bodies are a runtime error +
  * return -1 (deliberately not #error, so build.c still compiles
@@ -122,16 +122,16 @@ static int copy_dir_r(const char *src_dir, const char *dst_dir) {
 }
 
 /* Copy the built artifacts to the system paths under prefix (shared
-   by install and gen_deb's data root): build/output/libsx.so ->
+   by install and gen_deb's data root): build/output/libstringx.so ->
    <prefix>/lib, the synced headers (build/output/include) ->
    <prefix>/include, and LICENSE + THIRD_PARTY_NOTICES.md ->
-   <prefix>/share/doc/libsx (LICENSE also as the Debian `copyright`).
+   <prefix>/share/doc/libstringx (LICENSE also as the Debian `copyright`).
    Returns 0 on success. */
 static int install_to(const char *prefix) {
   int ret = 0;
   char *lib = os_path_join(prefix, "lib");
   char *inc = os_path_join(prefix, "include");
-  char *doc = os_path_join(prefix, "share/doc/libsx");
+  char *doc = os_path_join(prefix, "share/doc/libstringx");
   if (!lib || !inc || !doc || os_mkdir_r(lib) != 0 || os_mkdir_r(inc) != 0 ||
       os_mkdir_r(doc) != 0) {
     free(lib);
@@ -140,8 +140,8 @@ static int install_to(const char *prefix) {
     return -1;
   }
 
-  char *dst = os_path_join(lib, "libsx.so");
-  if (os_copy_file("build/output/libsx.so", dst) != 0)
+  char *dst = os_path_join(lib, "libstringx.so");
+  if (os_copy_file("build/output/libstringx.so", dst) != 0)
     ret = -1;
   free(dst);
 
@@ -171,19 +171,20 @@ static int install_to(const char *prefix) {
    aarch64->arm64; anything else is kept as-is */
 static const char *deb_arch(void) {
   static char buf[64];
-  char *out = os_shell((char *[]){"uname", "-m", NULL});
+  sx_t *out = os_shell((char *[]){"uname", "-m", NULL});
   if (!out)
     return "amd64";
-  size_t len = strlen(out);
-  while (len > 0 && (out[len - 1] == '\n' || out[len - 1] == '\r'))
-    out[--len] = '\0';
-  const char *m = out;
+  char *s = sx_buf_mut(out);
+  size_t len = strlen(s);
+  while (len > 0 && (s[len - 1] == '\n' || s[len - 1] == '\r'))
+    s[--len] = '\0';
+  const char *m = s;
   if (strcmp(m, "x86_64") == 0)
     m = "amd64";
   else if (strcmp(m, "aarch64") == 0)
     m = "arm64";
   snprintf(buf, sizeof(buf), "%s", m);
-  free(out);
+  sx_free(out);
   return buf;
 }
 
@@ -191,8 +192,7 @@ static const char *deb_arch(void) {
    returns -1 on failure */
 static int run_quiet(char **argv) {
   int st = -1;
-  char *out = os_execute_capture_all_status(argv[0], argv, "", NULL, &st);
-  free(out);
+  sx_free(os_execute_capture_all_status(argv[0], argv, "", NULL, &st));
   return st == 0 ? 0 : -1;
 }
 #endif /* LINUX */
@@ -240,7 +240,7 @@ function(gen_deb) {
   /* Layout:
        build/deb/
          debian-binary  data/  control-dir/control
-         control.tar.gz data.tar.gz  libsx_<ver>_<arch>.deb */
+         control.tar.gz data.tar.gz  libstringx_<ver>_<arch>.deb */
   char *work = os_path_join("build", "deb");
   char *data = os_path_join(work, "data");
   char *cdir = os_path_join(work, "control-dir");
@@ -260,8 +260,8 @@ function(gen_deb) {
 
   /* Data root = reuse install's copy logic.  The deb data tree
      mirrors the filesystem root: packages install under /usr (FHS),
-     so the copy root is <data>/usr — lib/libsx.so, the headers,
-     share/doc/libsx (LICENSE, notices, copyright). */
+     so the copy root is <data>/usr — lib/libstringx.so, the headers,
+     share/doc/libstringx (LICENSE, notices, copyright). */
   char *data_usr = os_path_join(data, "usr");
   if (!data_usr) {
     ret = -1;
@@ -286,7 +286,7 @@ function(gen_deb) {
     ret = -1;
     goto cleanup;
   }
-  snprintf(deb, deblen, "%s/libsx_%s_%s.deb", work, ver, arch);
+  snprintf(deb, deblen, "%s/libstringx_%s_%s.deb", work, ver, arch);
 
   FILE *f = fopen(deb_bin, "w");
   if (f) {
@@ -298,14 +298,14 @@ function(gen_deb) {
   f = fopen(ctl, "w");
   if (f) {
     fprintf(f,
-            "Package: libsx\n"
+            "Package: libstringx\n"
             "Version: %s\n"
             "Section: libs\n"
             "Priority: optional\n"
             "Architecture: %s\n"
             "Maintainer: Minelogy <minelogy-dev@users.noreply.github.com>\n"
             "Depends: libc6, libpcre2-8-0\n"
-            "Description: libsx - a small C string library with a single-\n"
+            "Description: libstringx - a small C string library with a single-\n"
             " header API and a byte-exact, zero-copy view model\n",
             ver, arch);
     fclose(f);

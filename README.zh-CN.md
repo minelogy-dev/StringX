@@ -1,7 +1,7 @@
 # String X
 
 一个轻量的 C 字符串库：**单头 API** + 字节精确、零拷贝的视图模型。
-版本 **v0.5**。库本身以 **libsx** 构建并链接（`-lsx`），项目主页：
+版本 **v0.5**。库本身以 **libstringx** 构建并链接（`-lstringx`），项目主页：
 [github.com/minelogy-dev/StringX](https://github.com/minelogy-dev/StringX)。
 
 使用时只需：
@@ -10,7 +10,7 @@
 #include <sx.h>
 ```
 
-并链接 `-lsx` —— 一个头文件，一个库。
+并链接 `-lstringx` —— 一个头文件，一个库。
 
 ## 设计
 
@@ -32,13 +32,13 @@
 - 构建需要 `forge` 构建工具（https://github.com/minelogy-dev/forge —— 自定义
   构建系统：它会将 `build.c` 编译成本地 `./make` 入口）
 - `libpcre2-dev`（PCRE2 8 位）——正则层的依赖；共享库自身已链接
-  `pcre2-8`，使用者只需 `-lsx`
+  `pcre2-8`，使用者只需 `-lstringx`
 
 ## 构建
 
 ```sh
 forge .        # 把 build.c 编译成 ./make（改动 build.c 后需重跑）
-./make         # 构建 -> build/output/libsx.so（头文件随附于 build/output/include）
+./make         # 构建 -> build/output/libstringx.so（头文件随附于 build/output/include）
 ./make test    # 编译并运行 tests/ 下每个测试（ASan + UBSan）
 ```
 
@@ -63,7 +63,7 @@ int main(void) {
 编译：
 
 ```sh
-cc app.c -I<头文件路径> -L<库路径> -lsx
+cc app.c -I<头文件路径> -L<库路径> -lstringx
 ```
 
 ## 正则（adv 层：`sx_reg_*`）

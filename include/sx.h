@@ -56,7 +56,7 @@ sx_view_t *sx_split(const sx_t *h, const char *sep);
  * a C string and cannot contain a literal NUL.  A compiled regex is
  * immutable and may be shared across threads (each call uses its
  * own match data).  The library links pcre2-8 itself: consumers
- * only need -lsx.
+ * only need -lstringx.
  *
  * No-match / invalid input / allocation failure NEVER crashes; the
  * per-family error shape is a not-found sentinel: int -> 0,
