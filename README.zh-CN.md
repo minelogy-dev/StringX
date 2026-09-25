@@ -33,6 +33,7 @@
   构建系统：它会将 `build.c` 编译成本地 `./make` 入口）
 - `libpcre2-dev`（PCRE2 8 位）——正则层的依赖；共享库自身已链接
   `pcre2-8`，使用者只需 `-lstringx`
+- 推荐使用者安装 `pkg-config`（或 pkgconf）—— 安装包自带 `libstringx.pc`
 
 ## 构建
 
@@ -60,10 +61,11 @@ int main(void) {
 }
 ```
 
-编译：
+编译（手动，或经 pkg-config）：
 
 ```sh
 cc app.c -I<头文件路径> -L<库路径> -lstringx
+cc app.c $(pkg-config --cflags --libs libstringx)   # 安装后
 ```
 
 ## 正则（adv 层：`sx_reg_*`）

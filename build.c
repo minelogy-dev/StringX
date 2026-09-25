@@ -161,6 +161,43 @@ static int install_to(const char *prefix) {
     ret = -1;
   free(f);
 
+  /* pkg-config metadata: <prefix>/lib/pkgconfig/libstringx.pc.  The
+     prefix is baked in at staging time, so the same installer serves
+     dpkg (/usr) and plain-prefix installs (/usr/local, ~/.local …).
+     Version comes from build.conf (SX_VERSION), leading v stripped. */
+  {
+    const char *v = SX_VERSION;
+    if (*v == 'v')
+      v++;
+    char *pcdir = os_path_join(lib, "pkgconfig");
+    char *pc = os_path_join(pcdir, "libstringx.pc");
+    if (!pcdir || !pc || os_mkdir_r(pcdir) != 0) {
+      ret = -1;
+    } else {
+      FILE *f = fopen(pc, "w");
+      if (!f)
+        ret = -1;
+      else {
+        fprintf(f,
+                "prefix=%s\n"
+                "exec_prefix=${prefix}\n"
+                "libdir=${prefix}/lib\n"
+                "includedir=${prefix}/include\n"
+                "\n"
+                "Name: libstringx\n"
+                "Description: String X - a small C string library with a "
+                "single-header API and a byte-exact, zero-copy view model\n"
+                "Version: %s\n"
+                "Libs: -L${libdir} -lstringx\n"
+                "Cflags: -I${includedir}\n",
+                prefix, v);
+        fclose(f);
+      }
+    }
+    free(pcdir);
+    free(pc);
+  }
+
   free(lib);
   free(inc);
   free(doc);

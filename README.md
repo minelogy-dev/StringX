@@ -37,6 +37,8 @@ and link `-lstringx` — one header, one library.
   a custom build system; the tool compiles `build.c` into a local `./make` entry)
 - `libpcre2-dev` (PCRE2 8-bit) — the regex layer's dependency; the shared
   library links `pcre2-8` itself, so consumers only need `-lstringx`
+- `pkg-config` (or `pkgconf`) recommended for consumers — the installed
+  package ships `libstringx.pc`
 
 ## Build
 
@@ -64,10 +66,11 @@ int main(void) {
 }
 ```
 
-Compile with:
+Compile with (manually, or via pkg-config):
 
 ```sh
 cc app.c -I<path-to-include> -L<path-to-lib> -lstringx
+cc app.c $(pkg-config --cflags --libs libstringx)   # after install
 ```
 
 ## Regex (advanced layer: `sx_reg_*`)
