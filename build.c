@@ -48,8 +48,8 @@ function(build) {
     for (int i = 0; i < n; i++) {
       if (!strstr(names[i], ".h"))
         continue;
-      char *src = os_path_join("include", names[i]);
-      char *dst = os_path_join("build/output/include", names[i]);
+      char *src = os_cstr(os_path_join("include", names[i]));
+      char *dst = os_cstr(os_path_join("build/output/include", names[i]));
       int r = (!src || !dst) ? -1 : os_copy_file(src, dst);
       free(src);
       free(dst);
@@ -103,8 +103,8 @@ static int copy_dir_r(const char *src_dir, const char *dst_dir) {
     return -1;
   int ret = 0;
   for (int i = 0; i < n && ret == 0; i++) {
-    char *s = os_path_join(src_dir, names[i]);
-    char *d = os_path_join(dst_dir, names[i]);
+    char *s = os_cstr(os_path_join(src_dir, names[i]));
+    char *d = os_cstr(os_path_join(dst_dir, names[i]));
     if (!s || !d) {
       ret = -1;
     } else if (os_path_is_dir(s)) {
@@ -126,12 +126,16 @@ static int copy_dir_r(const char *src_dir, const char *dst_dir) {
    <prefix>/lib, the synced headers (build/output/include) ->
    <prefix>/include, and LICENSE + THIRD_PARTY_NOTICES.md ->
    <prefix>/share/doc/libstringx (LICENSE also as the Debian `copyright`).
-   Returns 0 on success. */
-static int install_to(const char *prefix) {
+   `pc_prefix` is the prefix baked into lib/pkgconfig/libstringx.pc: the
+   dpkg data tree is staged under build/deb/data/usr but the package is
+   INSTALLED at the FHS root, so gen_deb passes "/usr" while a plain
+   install passes the real prefix (the staging path must never leak
+   into the .pc).  Returns 0 on success. */
+static int install_to(const char *prefix, const char *pc_prefix) {
   int ret = 0;
-  char *lib = os_path_join(prefix, "lib");
-  char *inc = os_path_join(prefix, "include");
-  char *doc = os_path_join(prefix, "share/doc/libstringx");
+  char *lib = os_cstr(os_path_join(prefix, "lib"));
+  char *inc = os_cstr(os_path_join(prefix, "include"));
+  char *doc = os_cstr(os_path_join(prefix, "share/doc/libstringx"));
   if (!lib || !inc || !doc || os_mkdir_r(lib) != 0 || os_mkdir_r(inc) != 0 ||
       os_mkdir_r(doc) != 0) {
     free(lib);
@@ -140,7 +144,7 @@ static int install_to(const char *prefix) {
     return -1;
   }
 
-  char *dst = os_path_join(lib, "libstringx.so");
+  char *dst = os_cstr(os_path_join(lib, "libstringx.so"));
   if (os_copy_file("build/output/libstringx.so", dst) != 0)
     ret = -1;
   free(dst);
@@ -148,29 +152,28 @@ static int install_to(const char *prefix) {
   if (copy_dir_r("build/output/include", inc) != 0)
     ret = -1;
 
-  char *f = os_path_join(doc, "LICENSE");
+  char *f = os_cstr(os_path_join(doc, "LICENSE"));
   if (os_copy_file("LICENSE", f) != 0)
     ret = -1;
   free(f);
-  f = os_path_join(doc, "THIRD_PARTY_NOTICES.md");
+  f = os_cstr(os_path_join(doc, "THIRD_PARTY_NOTICES.md"));
   if (os_copy_file("THIRD_PARTY_NOTICES.md", f) != 0)
     ret = -1;
   free(f);
-  f = os_path_join(doc, "copyright"); /* Debian's conventional name */
+  f = os_cstr(os_path_join(doc, "copyright")); /* Debian's conventional name */
   if (os_copy_file("LICENSE", f) != 0)
     ret = -1;
   free(f);
 
   /* pkg-config metadata: <prefix>/lib/pkgconfig/libstringx.pc.  The
-     prefix is baked in at staging time, so the same installer serves
-     dpkg (/usr) and plain-prefix installs (/usr/local, ~/.local …).
+     baked-in prefix is pc_prefix (see above), NOT the staging prefix.
      Version comes from build.conf (SX_VERSION), leading v stripped. */
   {
     const char *v = SX_VERSION;
     if (*v == 'v')
       v++;
-    char *pcdir = os_path_join(lib, "pkgconfig");
-    char *pc = os_path_join(pcdir, "libstringx.pc");
+    char *pcdir = os_cstr(os_path_join(lib, "pkgconfig"));
+    char *pc = os_cstr(os_path_join(pcdir, "libstringx.pc"));
     if (!pcdir || !pc || os_mkdir_r(pcdir) != 0) {
       ret = -1;
     } else {
@@ -190,7 +193,7 @@ static int install_to(const char *prefix) {
                 "Version: %s\n"
                 "Libs: -L${libdir} -lstringx\n"
                 "Cflags: -I${includedir}\n",
-                prefix, v);
+                pc_prefix, v);
         fclose(f);
       }
     }
@@ -243,7 +246,7 @@ function(install) {
   int r = function_build(argc, argv);
   if (r != 0)
     return r;
-  r = install_to(prefix);
+  r = install_to(prefix, prefix);
   if (r != 0)
     fprintf(stderr,
             "forge: install to %s failed\n"
@@ -278,9 +281,9 @@ function(gen_deb) {
        build/deb/
          debian-binary  data/  control-dir/control
          control.tar.gz data.tar.gz  libstringx_<ver>_<arch>.deb */
-  char *work = os_path_join("build", "deb");
-  char *data = os_path_join(work, "data");
-  char *cdir = os_path_join(work, "control-dir");
+  char *work = os_cstr(os_path_join("build", "deb"));
+  char *data = os_cstr(os_path_join(work, "data"));
+  char *cdir = os_cstr(os_path_join(work, "control-dir"));
   if (!work || !data || !cdir) {
     free(work);
     free(data);
@@ -299,12 +302,12 @@ function(gen_deb) {
      mirrors the filesystem root: packages install under /usr (FHS),
      so the copy root is <data>/usr — lib/libstringx.so, the headers,
      share/doc/libstringx (LICENSE, notices, copyright). */
-  char *data_usr = os_path_join(data, "usr");
+  char *data_usr = os_cstr(os_path_join(data, "usr"));
   if (!data_usr) {
     ret = -1;
     goto cleanup;
   }
-  if (install_to(data_usr) != 0) {
+  if (install_to(data_usr, "/usr") != 0) {
     free(data_usr);
     free(work);
     free(data);
@@ -313,10 +316,10 @@ function(gen_deb) {
   }
   free(data_usr);
 
-  char *deb_bin = os_path_join(work, "debian-binary");
-  char *ctl = os_path_join(cdir, "control");
-  char *cgz = os_path_join(work, "control.tar.gz");
-  char *dgz = os_path_join(work, "data.tar.gz");
+  char *deb_bin = os_cstr(os_path_join(work, "debian-binary"));
+  char *ctl = os_cstr(os_path_join(cdir, "control"));
+  char *cgz = os_cstr(os_path_join(work, "control.tar.gz"));
+  char *dgz = os_cstr(os_path_join(work, "data.tar.gz"));
   size_t deblen = strlen(work) + strlen(ver) + strlen(arch) + 28;
   char *deb = malloc(deblen);
   if (!deb_bin || !ctl || !cgz || !dgz || !deb) {
