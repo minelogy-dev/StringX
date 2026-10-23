@@ -118,6 +118,9 @@ Contract highlights (full detail in `sx.h`):
 
 ## Tests
 
+Pull requests run compiler, sanitizer, static-analysis and secret checks.
+See [Continuous integration](docs/CI.md) for coverage and merge-protection setup.
+
 ```sh
 ./make test
 ```
