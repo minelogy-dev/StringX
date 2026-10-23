@@ -3,13 +3,15 @@
    pcre2-8 is attached to every test target here — via forge's
    reserved per-test DSL overrides (LANGUAGE / TOOLCHAIN expand inside
    each test target block; see build.h "test DSL default macros").
-   Must be #defined before #include <build.h> (the guards). */
+   Must be #defined before #include <build.h> (the guards).
+   Tests disable LTO because the pinned Forge emits GCC-only -flto=N
+   for parallel Clang links. Production library targets keep LTO. */
 #define LANGUAGE                                                               \
-  {                                                                            \
+  do {                                                                         \
     set_language(C);                                                           \
     set(TARGET_LTO, 1, DISABLE);                                                \
     add_link_lib("pcre2-8");                                                   \
-  }
+  } while (0)
 #ifndef CONF_compiler
 #define CONF_compiler GCC
 #endif
