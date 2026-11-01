@@ -55,6 +55,8 @@ jobs:
           persist-credentials: false
       - name: Validate, measure and report on one pinned CPU
         run: python3 benchmarks/run.py --cc gcc-14 --cc clang-19
+      - name: Analyze search cost and generated code
+        run: python3 benchmarks/search_diag.py --cc gcc-14 --cc clang-19
       - name: Preserve raw samples and environment
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
