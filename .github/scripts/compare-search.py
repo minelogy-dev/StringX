@@ -67,8 +67,8 @@ def main():
     anchor = "    Fixture f; prepare(&f, &cases[ci]);"
     assert anchor in source
     source = source.replace(anchor,
-        "    if (cases[ci].op != FIND && cases[ci].op != FIND_CHAR) continue;\\n"
-        + anchor, 1)
+        "    if (cases[ci].op != FIND && cases[ci].op != FIND_CHAR) continue;"
+        + chr(10) + anchor, 1)
     for variant in ("before", "after"):
         folder = WORK / variant / "benchmarks"
         folder.mkdir(parents=True, exist_ok=True)
