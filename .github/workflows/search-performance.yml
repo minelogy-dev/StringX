@@ -1,0 +1,78 @@
+name: Search performance
+
+on:
+  pull_request:
+    paths:
+      - 'src/sx_core.c'
+      - '.github/scripts/compare-search.py'
+      - '.github/workflows/search-performance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: search-performance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  benchmark:
+    name: Search before and after (GCC and Clang)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install benchmark compilers and PCRE2 headers
+        timeout-minutes: 5
+        run: |
+          if test -f /etc/apt/apt-mirrors.txt; then
+            printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          fi
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get \
+            -o DPkg::Lock::Timeout=120 -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
+            install --no-install-recommends -y gcc-14 clang-19 libclang-rt-19-dev libpcre2-dev pkg-config
+      - name: Check out the library baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 452314a7ca51f90a7a8fa66930947164af8fc4f6
+          path: build/search-performance/before
+          persist-credentials: false
+      - name: Check out the immutable benchmark harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ecf31d3d65a45466222dfb0f358e176a22d1bc1c
+          path: build/search-performance/harness
+          persist-credentials: false
+      - name: Check out pinned SDS
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: antirez/sds
+          ref: 5347739b1581fcba74fd5cab1fc21d2aef317d71
+          path: build/search-performance/deps/sds
+          persist-credentials: false
+      - name: Check out pinned bstrlib
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: websnarf/bstrlib
+          ref: f0ff1e808102a42cdc7204a4bb6fe231a24c4546
+          path: build/search-performance/deps/bstrlib
+          persist-credentials: false
+      - name: Validate, measure and report on one pinned CPU
+        run: python3 .github/scripts/compare-search.py
+      - name: Preserve raw samples and environment
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: search-performance-${{ github.run_id }}
+          path: build/search-performance/results
+          if-no-files-found: ignore
+          retention-days: 14

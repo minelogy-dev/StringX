@@ -281,6 +281,17 @@ extern void *memrchr(const void *s, int c, size_t n);
 #define SX_USE_MEMRCHR 0
 #endif
 
+/* Keep native substring search local to short forward-FIRST needles.
+   Long or repetitive needles retain KMP's linear worst-case bound.
+   The forced fallback is exercised by the sanitizer suite. */
+#if !defined(SX_FORCE_NO_MEMMEM) && defined(__GLIBC__)
+extern void *memmem(const void *haystack, size_t haystacklen,
+                    const void *needle, size_t needlelen);
+#define SX_USE_MEMMEM 1
+#else
+#define SX_USE_MEMMEM 0
+#endif
+
 /*
  * Internal search primitive.  Byte-exact (memcmp semantics) search for
  * needle[0 .. len) inside h's content region; an embedded '\0' in the
@@ -296,7 +307,7 @@ extern void *memrchr(const void *s, int c, size_t n);
  *
  * opt bit1 (2): "first" -- single result: leftmost (or, with right,
  *     rightmost) match position, or (find_ret_t)-1 if none.
- *     No allocation.
+ *     KMP fallback may allocate a temporary prefix table.
  * opt bit1 clear: ALL mode -- malloc'd size_t array, caller frees:
  *     arr[0] = count, arr[1..count] = positions in ascending order
  *     (overlapping matches included).  count == 0 -> a valid {0} array.
@@ -381,7 +392,40 @@ static inline find_ret_t find(const sx_t *h, const char *needle, int len,
     return (find_ret_t)r;
   }
 
-  /* m >= 2 */
+  if (first && !right) {
+    /* A front hit needs neither preprocessing nor an allocation. */
+    if (memcmp(t + l, needle, m) == 0)
+      return (find_ret_t)l;
+    if (er - l == m)
+      return (find_ret_t)-1;
+
+    /* Only [l+1, er-m] can start another legal window. memchr lets
+       libc scan these bytes in batches instead of advancing KMP one
+       byte at a time when the first byte is absent. */
+    const char *p = memchr(t + l + 1, needle[0], er - m - l);
+    if (!p)
+      return (find_ret_t)-1;
+    l = (size_t)(p - t);
+
+    /* No earlier window can match if its final byte is absent. This
+       also avoids KMP's fallback chain on a long repeated prefix.
+       The initial region check proves both lengths are in bounds. */
+    p = memchr(t + l + m - 1, needle[m - 1], er - l - m + 1);
+    if (!p)
+      return (find_ret_t)-1;
+    l = (size_t)(p - t) - (m - 1);
+
+#if SX_USE_MEMMEM
+    /* A small private cutoff bounds preprocessing and avoids routing
+       long repeated-prefix needles through libc's short-pattern path. */
+    if (m <= 32) {
+      p = memmem(t + l, er - l, needle, m);
+      return p ? (find_ret_t)(p - t) : (find_ret_t)-1;
+    }
+#endif
+  }
+
+  /* m >= 2: portable KMP fallback, reverse-FIRST and ALL modes */
   size_t *pi = malloc(m * sizeof(*pi));
   if (!pi)
     return first ? (find_ret_t)-1 : 0;
