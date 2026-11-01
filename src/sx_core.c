@@ -574,7 +574,7 @@ SYMBOL_PUBLIC size_t sx_find_cstr(const sx_t *h, const char *needle) {
 SYMBOL_PUBLIC size_t sx_find_char(const sx_t *h, char c) {
   if (!h)
     return (size_t)-1;
-  return (size_t)find_first(h, &c, 1, 0);
+  return (size_t)find(h, &c, 1, 0, 2);
 }
 SYMBOL_PUBLIC size_t sx_rfind(const sx_t *h, const sx_t *needle) {
   if (!h || !needle)

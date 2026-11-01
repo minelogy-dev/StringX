@@ -74,6 +74,7 @@ def main():
                        and (", FIND," in line or ", FIND_CHAR," in line))
     timing_names = [
         "find8_miss_65536", "find128_repeated_miss_65536",
+        "find_char_end_65536",
         "common8_miss_65536", "common33_miss_65536",
         "periodic8_miss_65536", "repeated128_end_present_miss_65536",
     ]
