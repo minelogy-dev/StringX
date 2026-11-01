@@ -64,6 +64,11 @@ def main():
   }
 """
     source = source.replace(anchor, setup + anchor, 1)
+    anchor = "    Fixture f; prepare(&f, &cases[ci]);"
+    assert anchor in source
+    source = source.replace(anchor,
+        "    if (cases[ci].op != FIND && cases[ci].op != FIND_CHAR) continue;\\n"
+        + anchor, 1)
     for variant in ("before", "after"):
         folder = WORK / variant / "benchmarks"
         folder.mkdir(parents=True, exist_ok=True)
@@ -112,7 +117,7 @@ def main():
             groups = {}
             for r in rows:
                 groups.setdefault((r["case"], r["library"]), []).append(float(r["ns_per_op"]))
-            assert len(groups) == 82 + len(extra) * 3, len(groups)
+            assert len(groups) == (8 + len(extra)) * 3, len(groups)
             stats = {}
             for (case, library), values in groups.items():
                 assert len(values) == 11

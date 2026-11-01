@@ -281,17 +281,6 @@ extern void *memrchr(const void *s, int c, size_t n);
 #define SX_USE_MEMRCHR 0
 #endif
 
-/* Keep native substring search local to short forward-FIRST needles.
-   Long or repetitive needles retain KMP's linear worst-case bound.
-   The forced fallback is exercised by the sanitizer suite. */
-#if !defined(SX_FORCE_NO_MEMMEM) && defined(__GLIBC__)
-extern void *memmem(const void *haystack, size_t haystacklen,
-                    const void *needle, size_t needlelen);
-#define SX_USE_MEMMEM 1
-#else
-#define SX_USE_MEMMEM 0
-#endif
-
 /*
  * Internal search primitive.  Byte-exact (memcmp semantics) search for
  * needle[0 .. len) inside h's content region; an embedded '\0' in the
@@ -392,40 +381,7 @@ static inline find_ret_t find(const sx_t *h, const char *needle, int len,
     return (find_ret_t)r;
   }
 
-  if (first && !right) {
-    /* A front hit needs neither preprocessing nor an allocation. */
-    if (memcmp(t + l, needle, m) == 0)
-      return (find_ret_t)l;
-    if (er - l == m)
-      return (find_ret_t)-1;
-
-    /* Only [l+1, er-m] can start another legal window. memchr lets
-       libc scan these bytes in batches instead of advancing KMP one
-       byte at a time when the first byte is absent. */
-    const char *p = memchr(t + l + 1, needle[0], er - m - l);
-    if (!p)
-      return (find_ret_t)-1;
-    l = (size_t)(p - t);
-
-    /* No earlier window can match if its final byte is absent. This
-       also avoids KMP's fallback chain on a long repeated prefix.
-       The initial region check proves both lengths are in bounds. */
-    p = memchr(t + l + m - 1, needle[m - 1], er - l - m + 1);
-    if (!p)
-      return (find_ret_t)-1;
-    l = (size_t)(p - t) - (m - 1);
-
-#if SX_USE_MEMMEM
-    /* A small private cutoff bounds preprocessing and avoids routing
-       long repeated-prefix needles through libc's short-pattern path. */
-    if (m <= 32) {
-      p = memmem(t + l, er - l, needle, m);
-      return p ? (find_ret_t)(p - t) : (find_ret_t)-1;
-    }
-#endif
-  }
-
-  /* m >= 2: portable KMP fallback, reverse-FIRST and ALL modes */
+  /* m >= 2 */
   size_t *pi = malloc(m * sizeof(*pi));
   if (!pi)
     return first ? (find_ret_t)-1 : 0;
@@ -469,52 +425,6 @@ static inline find_ret_t find(const sx_t *h, const char *needle, int len,
     if (needle[i] == needle[k])
       k++;
     pi[i] = k;
-  }
-
-  if (first) {
-    /* Batch skipping helps sparse candidates. After eight consecutive
-       skips of fewer than eight bytes, resume the scalar KMP below.
-       Dense/periodic inputs then pay only bounded setup work. */
-    unsigned near_budget = 8;
-    size_t q = 0, i = l;
-    for (; i < er; i++) {
-      while (q && t[i] != needle[q])
-        q = pi[q - 1];
-      if (t[i] == needle[q])
-        q++;
-      else {
-        /* All fallbacks failed: q == 0, so only a new start can match. */
-        if (++i == er)
-          break;
-        size_t next = i;
-        if (t[i] != needle[0]) {
-          const char *p = memchr(t + i + 1, needle[0], er - i - 1);
-          if (!p) {
-            free(pi);
-            return (find_ret_t)-1;
-          }
-          next = (size_t)(p - t);
-        }
-        if (next - i < 8) {
-          if (--near_budget == 0) {
-            l = next; /* this candidate has not been consumed */
-            break;
-          }
-        } else {
-          near_budget = 8;
-        }
-        i = next;
-        q = 1;
-      }
-      if (q == m) {
-        free(pi);
-        return (find_ret_t)(i + 1 - m);
-      }
-    }
-    if (i == er) {
-      free(pi);
-      return (find_ret_t)-1;
-    }
   }
 
   size_t *r = NULL;
@@ -567,6 +477,63 @@ static inline find_ret_t find(const sx_t *h, const char *needle, int len,
   r[0] = cnt;
   return (find_ret_t)r;
 }
+/* Native forward search is isolated from the portable KMP kernel so
+   its additional control flow does not perturb the fallback loop.
+   -DSX_FORCE_NO_MEMMEM exercises the original portable implementation. */
+#if !defined(SX_FORCE_NO_MEMMEM) && defined(__GLIBC__)
+extern void *memmem(const void *haystack, size_t haystacklen,
+                    const void *needle, size_t needlelen);
+#define SX_USE_MEMMEM 1
+#else
+#define SX_USE_MEMMEM 0
+#endif
+
+static inline find_ret_t find_first(const sx_t *h, const char *needle, int len,
+                                   size_t boundary) {
+#if SX_USE_MEMMEM
+  const size_t H = h->ref->len;
+  const size_t m = (size_t)len;
+  const char *t = h->ref->ptr;
+  size_t l = boundary;
+  if (len <= 0 || l >= H || m > H - l)
+    return (find_ret_t)-1;
+  if (m == 1) {
+    const char *p = memchr(t + l, needle[0], H - l);
+    return p ? (find_ret_t)(p - t) : (find_ret_t)-1;
+  }
+
+  /* Front hits need no preprocessing or prefix-table allocation. */
+  if (memcmp(t + l, needle, m) == 0)
+    return (find_ret_t)l;
+  if (H - l == m)
+    return (find_ret_t)-1;
+
+  /* Only [l+1, H-m] can start another legal window. */
+  const char *p = memchr(t + l + 1, needle[0], H - m - l);
+  if (!p)
+    return (find_ret_t)-1;
+  l = (size_t)(p - t);
+
+  /* A valid window must also end with the needle's final byte.
+     No earlier start can match before this first possible endpoint. */
+  p = memchr(t + l + m - 1, needle[m - 1], H - l - m + 1);
+  if (!p)
+    return (find_ret_t)-1;
+  l = (size_t)(p - t) - (m - 1);
+
+  /* Keep native search local to short patterns. Long repeated prefixes
+     can be a bad case for libc's short-pattern implementation; KMP
+     retains the linear bound for arbitrary long needles. */
+  if (m <= 32) {
+    p = memmem(t + l, H - l, needle, m);
+    return p ? (find_ret_t)(p - t) : (find_ret_t)-1;
+  }
+  return find(h, needle, len, l, 2);
+#else
+  return find(h, needle, len, boundary, 2);
+#endif
+}
+
 /* Wrappers translate the public API onto find().  Per the buffer model,
    a needle's searchable length is its CONTENT length (the trailing '\0'
    at ptr[len] is not content): sx_find* pass the needle's own length,
@@ -575,7 +542,7 @@ static inline find_ret_t find(const sx_t *h, const char *needle, int len,
 SYMBOL_PUBLIC size_t sx_find(const sx_t *h, const sx_t *needle) {
   if (!h || !needle)
     return (size_t)-1;
-  return (size_t)find(h, needle->ref->ptr, needle->ref->len, 0, 2);
+  return (size_t)find_first(h, needle->ref->ptr, needle->ref->len, 0);
 }
 SYMBOL_PUBLIC size_t sx_find_view(const sx_t *h, sx_view_t needle) {
   return sx_find_view_b(h, needle, 0);
@@ -585,18 +552,18 @@ SYMBOL_PUBLIC size_t sx_find_view_b(const sx_t *h, sx_view_t needle,
                                     size_t boundary) {
   if (!h)
     return (size_t)-1;
-  return (size_t)find(h, needle.ref->ptr + needle.offset, needle.len, boundary,
-                      2);
+  return (size_t)find_first(h, needle.ref->ptr + needle.offset, needle.len,
+                            boundary);
 }
 SYMBOL_PUBLIC size_t sx_find_cstr(const sx_t *h, const char *needle) {
   if (!h || !needle)
     return (size_t)-1;
-  return (size_t)find(h, needle, (int)strlen(needle), 0, 2);
+  return (size_t)find_first(h, needle, (int)strlen(needle), 0);
 }
 SYMBOL_PUBLIC size_t sx_find_char(const sx_t *h, char c) {
   if (!h)
     return (size_t)-1;
-  return (size_t)find(h, &c, 1, 0, 2);
+  return (size_t)find_first(h, &c, 1, 0);
 }
 SYMBOL_PUBLIC size_t sx_rfind(const sx_t *h, const sx_t *needle) {
   if (!h || !needle)
