@@ -296,7 +296,7 @@ extern void *memrchr(const void *s, int c, size_t n);
  *
  * opt bit1 (2): "first" -- single result: leftmost (or, with right,
  *     rightmost) match position, or (find_ret_t)-1 if none.
- *     No allocation.
+ *     KMP fallback may allocate a temporary prefix table.
  * opt bit1 clear: ALL mode -- malloc'd size_t array, caller frees:
  *     arr[0] = count, arr[1..count] = positions in ascending order
  *     (overlapping matches included).  count == 0 -> a valid {0} array.
@@ -477,6 +477,74 @@ static inline find_ret_t find(const sx_t *h, const char *needle, int len,
   r[0] = cnt;
   return (find_ret_t)r;
 }
+/* Keep optional native checks out of the portable KMP callers'
+   optimizer context. The forced build uses the original path directly. */
+#if !defined(SX_FORCE_NO_MEMMEM) && defined(__GLIBC__)
+extern void *memmem(const void *haystack, size_t haystacklen,
+                    const void *needle, size_t needlelen);
+
+/* GCC and Clang support this private hint on glibc targets. It keeps
+   native-path conditions from changing the fallback's specialization. */
+static __attribute__((noinline)) int
+try_native_find_first(const sx_t *h, const char *needle, int len,
+                      size_t boundary, find_ret_t *result) {
+  const size_t H = h->ref->len;
+  const size_t m = (size_t)len;
+  const char *t = h->ref->ptr;
+  size_t l = boundary;
+  *result = (find_ret_t)-1;
+  if (len <= 0 || l >= H || m > H - l)
+    return 1;
+  if (m == 1) {
+    const char *p = memchr(t + l, needle[0], H - l);
+    if (p)
+      *result = (find_ret_t)(p - t);
+    return 1;
+  }
+
+  /* Front hits need no preprocessing or prefix-table allocation. */
+  if (memcmp(t + l, needle, m) == 0) {
+    *result = (find_ret_t)l;
+    return 1;
+  }
+  if (H - l == m)
+    return 1;
+
+  /* Only [l+1, H-m] can start another legal window. */
+  const char *p = memchr(t + l + 1, needle[0], H - m - l);
+  if (!p)
+    return 1;
+  l = (size_t)(p - t);
+
+  /* A valid window must also end with the needle's final byte.
+     No earlier start can match before this first possible endpoint. */
+  p = memchr(t + l + m - 1, needle[m - 1], H - l - m + 1);
+  if (!p)
+    return 1;
+  l = (size_t)(p - t) - (m - 1);
+
+  /* Limit native search to short patterns. Long repeated prefixes can
+     be a bad case for libc's short-pattern implementation. */
+  if (m <= 32) {
+    p = memmem(t + l, H - l, needle, m);
+    if (p)
+      *result = (find_ret_t)(p - t);
+    return 1;
+  }
+  return 0; /* original KMP handles the unresolved long needle */
+}
+#endif
+
+static inline find_ret_t find_first(const sx_t *h, const char *needle, int len,
+                                   size_t boundary) {
+#if !defined(SX_FORCE_NO_MEMMEM) && defined(__GLIBC__)
+  find_ret_t result;
+  if (try_native_find_first(h, needle, len, boundary, &result))
+    return result;
+#endif
+  return find(h, needle, len, boundary, 2);
+}
+
 /* Wrappers translate the public API onto find().  Per the buffer model,
    a needle's searchable length is its CONTENT length (the trailing '\0'
    at ptr[len] is not content): sx_find* pass the needle's own length,
@@ -485,7 +553,7 @@ static inline find_ret_t find(const sx_t *h, const char *needle, int len,
 SYMBOL_PUBLIC size_t sx_find(const sx_t *h, const sx_t *needle) {
   if (!h || !needle)
     return (size_t)-1;
-  return (size_t)find(h, needle->ref->ptr, needle->ref->len, 0, 2);
+  return (size_t)find_first(h, needle->ref->ptr, needle->ref->len, 0);
 }
 SYMBOL_PUBLIC size_t sx_find_view(const sx_t *h, sx_view_t needle) {
   return sx_find_view_b(h, needle, 0);
@@ -495,13 +563,13 @@ SYMBOL_PUBLIC size_t sx_find_view_b(const sx_t *h, sx_view_t needle,
                                     size_t boundary) {
   if (!h)
     return (size_t)-1;
-  return (size_t)find(h, needle.ref->ptr + needle.offset, needle.len, boundary,
-                      2);
+  return (size_t)find_first(h, needle.ref->ptr + needle.offset, needle.len,
+                            boundary);
 }
 SYMBOL_PUBLIC size_t sx_find_cstr(const sx_t *h, const char *needle) {
   if (!h || !needle)
     return (size_t)-1;
-  return (size_t)find(h, needle, (int)strlen(needle), 0, 2);
+  return (size_t)find_first(h, needle, (int)strlen(needle), 0);
 }
 SYMBOL_PUBLIC size_t sx_find_char(const sx_t *h, char c) {
   if (!h)
