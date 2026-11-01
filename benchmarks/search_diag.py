@@ -115,18 +115,18 @@ def build(cc, folder, deps, log, counted, sanitize=False):
             if label == "sx-core":
                 selected = []
                 lines = text.splitlines()
-                needles = ["while (q && t[i] != needle[q])", "if (t[i] == needle[q])"]
+                needles = ["if (t[i] == needle[q])"]
                 for i, line in enumerate(lines):
                     if any(needle in line for needle in needles):
-                        selected.append("\n".join(lines[max(0, i - 4):i + 40]))
-                        if len(selected) == 2:
+                        selected.append("\n".join(lines[max(0, i - 12):i + 44]))
+                        if len(selected) == 8:
                             break
                 print("KMP_ASM_JSON=" + json.dumps({"compiler": cc, "snippets": selected}))
 
             else:
                 clean = output(["objdump", "-d", "-Mintel", str(obj)])
                 selected = {}
-                for name in ("kernel_scalar_probe", "kernel_kmp_scan", "kernel_kmp_first"):
+                for name in ("kernel_scalar_probe", "kernel_kmp_scan", "kernel_kmp_first", "kernel_kmp_branch_control", "kernel_kmp_match_loop"):
                     match = re.search(r"^[0-9a-f]+ <" + name + r">:\n(.*?)(?=\n\n|\Z)", clean, re.M | re.S)
                     if match:
                         selected[name] = match.group(0)[:6500]

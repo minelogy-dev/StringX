@@ -143,6 +143,36 @@ static NOINLINE size_t kernel_kmp_scan(Input *f) {
   }
   return SIZE_MAX;
 }
+
+/* Diagnostic control: an empty read/write register asm forces an explicit
+   matched branch. It emits no CPU instruction and leaves q unchanged at run
+   time, but prevents if-conversion. This is not a production implementation. */
+static NOINLINE size_t kernel_kmp_branch_control(Input *f) {
+  size_t q = 0, n = f->c->n, m = f->c->m;
+  for (size_t i = 0; i < n; ++i) {
+    while (q && f->t[i] != f->p[q]) q = f->pi[q - 1];
+    if (f->t[i] == f->p[q]) {
+      __asm__ __volatile__("" : "+r"(q));
+      ++q;
+    }
+    if (q == m) return i + 1 - m;
+  }
+  return SIZE_MAX;
+}
+/* Same KMP state transitions with one explicit match test per state, instead
+   of retesting equality after the while condition exits. */
+static NOINLINE size_t kernel_kmp_match_loop(Input *f) {
+  size_t q = 0, n = f->c->n, m = f->c->m;
+  for (size_t i = 0; i < n; ++i) {
+    for (;;) {
+      if (f->t[i] == f->p[q]) { ++q; break; }
+      if (!q) break;
+      q = f->pi[q - 1];
+    }
+    if (q == m) return i + 1 - m;
+  }
+  return SIZE_MAX;
+}
 static size_t prefix_scratch[256];
 static NOINLINE size_t kernel_prefix(Input *f) {
   make_pi(f->p, f->c->m, prefix_scratch);
@@ -179,6 +209,8 @@ static const Variant variants[] = {
 #endif
   {"kmp_first_only_heap", kernel_kmp_first, 0, 0},
   {"kmp_scan_precomputed", kernel_kmp_scan, 0, 0},
+  {"kmp_scan_branch_control", kernel_kmp_branch_control, 0, 0},
+  {"kmp_scan_match_loop", kernel_kmp_match_loop, 0, 0},
   {"prefix_build_only", kernel_prefix, 1, 0},
   {"malloc_free_only", kernel_alloc, 2, 0},
   {"bstrlib", kernel_bstr, 0, 0},

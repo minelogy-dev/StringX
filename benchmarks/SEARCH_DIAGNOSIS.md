@@ -22,6 +22,12 @@ missing/full end match, a periodic-text counterexample, and a front hit.
   It omits reverse/ALL configuration and has its own malloc/prefix construction.
 - kmp_scan_precomputed: only the forward scan, with a prefix table prepared
   outside the timed region.
+- kmp_scan_branch_control: diagnostic-only empty register asm forces the
+  matched branch to remain conditional; it emits no CPU instruction. This
+  tests if-conversion/data-dependency effects without recommending asm for
+  production use.
+- kmp_scan_match_loop: equivalent KMP state transitions expressed with an
+  explicit match-first loop, avoiding the source-level equality retest.
 - prefix_build_only / malloc_free_only: component controls. These timings
   cannot be added to reconstruct an exact whole-call breakdown.
 - bstrlib / glibc_memmem: native comparison paths.
