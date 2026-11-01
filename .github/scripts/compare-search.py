@@ -69,6 +69,9 @@ def main():
     source = source.replace(anchor,
         "    if (cases[ci].op != FIND && cases[ci].op != FIND_CHAR) continue;"
         + chr(10) + anchor, 1)
+    search_cases = sum(1 for line in source.splitlines()
+                       if line.lstrip().startswith('{"')
+                       and (", FIND," in line or ", FIND_CHAR," in line))
     for variant in ("before", "after"):
         folder = WORK / variant / "benchmarks"
         folder.mkdir(parents=True, exist_ok=True)
@@ -84,6 +87,7 @@ def main():
         "libc": bench.output(["ldd", "--version"]).splitlines()[0],
         "timing_flags": bench.COMMON + ["-O3", "-DNDEBUG"],
         "portable_flags": ["-DSX_FORCE_NO_MEMMEM"],
+        "cases": search_cases,
         "samples": 11, "target_sample_ns": 20000000,
         "note": "Variants run sequentially on the same pinned CPU. Hosted-runner scheduling and frequency remain uncontrolled.",
     }
@@ -117,7 +121,7 @@ def main():
             groups = {}
             for r in rows:
                 groups.setdefault((r["case"], r["library"]), []).append(float(r["ns_per_op"]))
-            assert len(groups) == (8 + len(extra)) * 3, len(groups)
+            assert len(groups) == search_cases * 3, len(groups)
             stats = {}
             for (case, library), values in groups.items():
                 assert len(values) == 11
