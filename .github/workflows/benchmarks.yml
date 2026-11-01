@@ -1,0 +1,70 @@
+name: String benchmarks
+
+on:
+  pull_request:
+    paths:
+      - 'benchmarks/**'
+      - '.github/workflows/benchmarks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: string-benchmarks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  benchmark:
+    name: GCC and Clang string benchmarks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install benchmark compilers and PCRE2 headers
+        timeout-minutes: 5
+        run: |
+          if test -f /etc/apt/apt-mirrors.txt; then
+            printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          fi
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get \
+            -o DPkg::Lock::Timeout=120 -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
+            install --no-install-recommends -y gcc-14 clang-19 libclang-rt-19-dev libpcre2-dev pkg-config
+      - name: Check out pinned SDS
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: antirez/sds
+          ref: 5347739b1581fcba74fd5cab1fc21d2aef317d71
+          path: build/benchmarks/deps/sds
+          persist-credentials: false
+      - name: Check out pinned bstrlib
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: websnarf/bstrlib
+          ref: f0ff1e808102a42cdc7204a4bb6fe231a24c4546
+          path: build/benchmarks/deps/bstrlib
+          persist-credentials: false
+      - name: Validate, measure and report on one pinned CPU
+        run: python3 benchmarks/run.py --cc gcc-14 --cc clang-19
+      - name: Preserve raw samples and environment
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: string-benchmarks-${{ github.run_id }}
+          path: |
+            build/benchmarks/results/**/*.csv
+            build/benchmarks/results/**/*.json
+            build/benchmarks/results/**/*.md
+            build/benchmarks/results/**/*.txt
+            build/benchmarks/results/**/*.log
+          if-no-files-found: ignore
+          retention-days: 14
