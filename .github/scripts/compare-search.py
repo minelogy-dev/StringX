@@ -78,6 +78,7 @@ def main():
         "pinned_cpu": cpu, "lscpu": json.loads(bench.output(["lscpu", "-J"])),
         "libc": bench.output(["ldd", "--version"]).splitlines()[0],
         "timing_flags": bench.COMMON + ["-O3", "-DNDEBUG"],
+        "portable_flags": ["-DSX_FORCE_NO_MEMMEM"],
         "samples": 11, "target_sample_ns": 20000000,
         "note": "Variants run sequentially on the same pinned CPU. Hosted-runner scheduling and frequency remain uncontrolled.",
     }
@@ -90,10 +91,12 @@ def main():
     env = os.environ.copy()
     env.update(ASAN_OPTIONS="detect_leaks=1:halt_on_error=1",
                UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1")
+    common_flags = list(bench.COMMON)
     for ci, cc in enumerate(("gcc-14", "clang-19")):
         results = {}
-        for variant in (("before", "after") if ci == 0 else ("after", "before")):
-            bench.ROOT = WORK / variant
+        for variant in (("before", "after", "portable") if ci == 0 else ("portable", "after", "before")):
+            bench.ROOT = WORK / ("before" if variant == "before" else "after")
+            bench.COMMON = common_flags + (["-DSX_FORCE_NO_MEMMEM"] if variant == "portable" else [])
             folder = out / cc / variant
             folder.mkdir(parents=True, exist_ok=True)
             log = folder / "commands.log"
@@ -121,9 +124,10 @@ def main():
                 }
             (folder / "summary.json").write_text(json.dumps(list(stats.values()), indent=2) + "\n")
             results[variant] = stats
+        bench.COMMON = common_flags
         report += [f"## {bench.output([cc, '--version']).splitlines()[0]}", "",
-                   "| Case | Before ns | After ns | Before/after | After malloc calls |",
-                   "| --- | ---: | ---: | ---: | ---: |"]
+                   "| Case | Before ns | Native ns | Portable ns | Native speedup | Portable speedup |",
+                   "| --- | ---: | ---: | ---: | ---: | ---: |"]
         compared = []
         for key, before in sorted(results["before"].items()):
             case, library = key
@@ -131,9 +135,12 @@ def main():
                 continue
             after_row = results["after"][key]
             ratio = before["median_ns"] / after_row["median_ns"]
-            row = {"case": case, "before": before, "after": after_row, "speedup": ratio}
+            portable = results["portable"][key]
+            portable_ratio = before["median_ns"] / portable["median_ns"]
+            row = {"case": case, "before": before, "after": after_row, "speedup": ratio,
+                   "portable": portable, "portable_speedup": portable_ratio}
             compared.append(row)
-            report.append(f"| {case} | {before['median_ns']:.2f} | {after_row['median_ns']:.2f} | {ratio:.2f}x | {after_row['malloc_calls']} |")
+            report.append(f"| {case} | {before['median_ns']:.2f} | {after_row['median_ns']:.2f} | {portable['median_ns']:.2f} | {ratio:.2f}x | {portable_ratio:.2f}x |")
         print("SEARCH_COMPARE_JSON=" + json.dumps({"compiler": cc, "results": compared}), flush=True)
         report.append("")
     text = "\n".join(report) + "\n"

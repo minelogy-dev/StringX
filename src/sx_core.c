@@ -491,12 +491,16 @@ static inline find_ret_t find(const sx_t *h, const char *needle, int len,
       /* A mismatch after all fallbacks leaves q == 0. Skip bytes
          that cannot start a match, then consume the first byte of
          the next candidate. These disjoint scans keep KMP linear. */
-      const char *p = memchr(t + i + 1, needle[0], er - i - 1);
-      if (!p) {
-        free(pi);
-        return (find_ret_t)-1;
+      if (++i == er)
+        break;
+      /* Dense candidates need no libc call (for example "abab...").
+         Otherwise let memchr skip the remaining unrelated bytes. */
+      if (t[i] != needle[0]) {
+        const char *p = memchr(t + i + 1, needle[0], er - i - 1);
+        if (!p)
+          break;
+        i = (size_t)(p - t);
       }
-      i = (size_t)(p - t);
       q = 1;
     }
     if (q == m) {
