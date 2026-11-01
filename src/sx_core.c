@@ -528,7 +528,9 @@ static inline find_ret_t find_first(const sx_t *h, const char *needle, int len,
     p = memmem(t + l, H - l, needle, m);
     return p ? (find_ret_t)(p - t) : (find_ret_t)-1;
   }
-  return find(h, needle, len, l, 2);
+  /* Preserve the original KMP entry and compiler specialization when
+     the endpoint checks cannot reject a long needle. */
+  return find(h, needle, len, boundary, 2);
 #else
   return find(h, needle, len, boundary, 2);
 #endif
