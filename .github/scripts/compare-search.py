@@ -72,6 +72,17 @@ def main():
     search_cases = sum(1 for line in source.splitlines()
                        if line.lstrip().startswith('{"')
                        and (", FIND," in line or ", FIND_CHAR," in line))
+    timing_names = [
+        "find8_miss_65536", "find128_repeated_miss_65536",
+        "common8_miss_65536", "common33_miss_65536",
+        "periodic8_miss_65536", "repeated128_end_present_miss_65536",
+    ]
+    selected = " || ".join(f'strcmp(cases[ci].name, "{name}") == 0'
+                           for name in timing_names)
+    source = source.replace(anchor,
+        f"    if (!check_only && !({selected})) continue;"
+        + chr(10) + anchor, 1)
+    repeats = 3
     for variant in ("before", "after"):
         folder = WORK / variant / "benchmarks"
         folder.mkdir(parents=True, exist_ok=True)
@@ -87,15 +98,15 @@ def main():
         "libc": bench.output(["ldd", "--version"]).splitlines()[0],
         "timing_flags": bench.COMMON + ["-O3", "-DNDEBUG"],
         "portable_flags": ["-DSX_FORCE_NO_MEMMEM"],
-        "cases": search_cases,
-        "samples": 11, "target_sample_ns": 20000000,
+        "correctness_cases": search_cases, "timing_cases": len(timing_names),
+        "processes": repeats, "samples_per_process": 11, "samples": 11 * repeats, "target_sample_ns": 20000000,
         "note": "Variants run sequentially on the same pinned CPU. Hosted-runner scheduling and frequency remain uncontrolled.",
     }
     (out / "environment.json").write_text(json.dumps(metadata, indent=2) + "\n")
     (out / "strings.c").write_text(source)
     print("SEARCH_COMPARE_ENV=" + json.dumps(metadata), flush=True)
     report = ["# Search before/after", "",
-              "Same job, pinned CPU, -O3, no LTO; medians of 11 hot-input samples.",
+              "Same job, pinned CPU, -O3, no LTO; 3 fresh processes, 11 hot-input samples each.",
               "Sequential runs are subject to host scheduling/frequency changes; small differences are inconclusive.", ""]
     env = os.environ.copy()
     env.update(ASAN_OPTIONS="detect_leaks=1:halt_on_error=1",
@@ -112,19 +123,22 @@ def main():
             check = bench.compile_binary(cc, folder / "check", "check", deps, log)
             bench.invoke([str(check), "--check"], log, env=env, cpu=cpu)
             binary = bench.compile_binary(cc, folder / "timing", "timing", deps, log)
-            bench.invoke([str(binary)], log, stdout=folder / "samples.csv", cpu=cpu)
+            rows = []
+            for process in range(repeats):
+                samples = folder / f"samples-{process}.csv"
+                bench.invoke([str(binary)], log, stdout=samples, cpu=cpu)
+                rows.extend(csv.DictReader(samples.open()))
             alloc = bench.compile_binary(cc, folder / "alloc", "alloc", deps, log)
             bench.invoke([str(alloc)], log, stdout=folder / "allocations.csv", cpu=cpu)
-            rows = list(csv.DictReader((folder / "samples.csv").open()))
             memory = {(r["case"], r["library"]): r
                       for r in csv.DictReader((folder / "allocations.csv").open())}
             groups = {}
             for r in rows:
                 groups.setdefault((r["case"], r["library"]), []).append(float(r["ns_per_op"]))
-            assert len(groups) == search_cases * 3, len(groups)
+            assert len(groups) == len(timing_names) * 3, len(groups)
             stats = {}
             for (case, library), values in groups.items():
-                assert len(values) == 11
+                assert len(values) == 11 * repeats
                 stats[case, library] = {
                     "case": case, "library": library,
                     "median_ns": statistics.median(values),
