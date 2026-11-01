@@ -471,6 +471,52 @@ static inline find_ret_t find(const sx_t *h, const char *needle, int len,
     pi[i] = k;
   }
 
+  if (first) {
+    /* Batch skipping helps sparse candidates. After eight consecutive
+       skips of fewer than eight bytes, resume the scalar KMP below.
+       Dense/periodic inputs then pay only bounded setup work. */
+    unsigned near_budget = 8;
+    size_t q = 0, i = l;
+    for (; i < er; i++) {
+      while (q && t[i] != needle[q])
+        q = pi[q - 1];
+      if (t[i] == needle[q])
+        q++;
+      else {
+        /* All fallbacks failed: q == 0, so only a new start can match. */
+        if (++i == er)
+          break;
+        size_t next = i;
+        if (t[i] != needle[0]) {
+          const char *p = memchr(t + i + 1, needle[0], er - i - 1);
+          if (!p) {
+            free(pi);
+            return (find_ret_t)-1;
+          }
+          next = (size_t)(p - t);
+        }
+        if (next - i < 8) {
+          if (--near_budget == 0) {
+            l = next; /* this candidate has not been consumed */
+            break;
+          }
+        } else {
+          near_budget = 8;
+        }
+        i = next;
+        q = 1;
+      }
+      if (q == m) {
+        free(pi);
+        return (find_ret_t)(i + 1 - m);
+      }
+    }
+    if (i == er) {
+      free(pi);
+      return (find_ret_t)-1;
+    }
+  }
+
   size_t *r = NULL;
   size_t cap = 0, cnt = 0;
   if (!first) {
@@ -487,22 +533,6 @@ static inline find_ret_t find(const sx_t *h, const char *needle, int len,
       q = pi[q - 1];
     if (t[i] == needle[q])
       q++;
-    else if (first) {
-      /* A mismatch after all fallbacks leaves q == 0. Skip bytes
-         that cannot start a match, then consume the first byte of
-         the next candidate. These disjoint scans keep KMP linear. */
-      if (++i == er)
-        break;
-      /* Dense candidates need no libc call (for example "abab...").
-         Otherwise let memchr skip the remaining unrelated bytes. */
-      if (t[i] != needle[0]) {
-        const char *p = memchr(t + i + 1, needle[0], er - i - 1);
-        if (!p)
-          break;
-        i = (size_t)(p - t);
-      }
-      q = 1;
-    }
     if (q == m) {
       size_t pos = i + 1 - m;
       if (first) {
