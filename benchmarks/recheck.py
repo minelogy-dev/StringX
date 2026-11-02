@@ -76,8 +76,8 @@ def build(cc, folder, mode, source, deps, generated, log):
                        "-fno-sanitize-recover=all", "-fno-omit-frame-pointer",
                        "-DRECHECK_VERIFY_CALLS"] if mode == "verify"
                       else ["-O3", "-DNDEBUG"])
-    includes = ["-I" + str(source / "include"), "-I" + str(deps / "sds"),
-                "-I" + str(deps / "bstrlib"), "-I" + str(ROOT / "benchmarks"),
+    includes = ["-isystem", str(source / "include"), "-isystem", str(deps / "sds"),
+                "-isystem", str(deps / "bstrlib"), "-I" + str(ROOT / "benchmarks"),
                 "-I" + str(generated)]
     sources = [source / "src/sx_core.c", source / "src/sx_raw.c",
                deps / "sds/sds.c", deps / "bstrlib/bstrlib.c"]
@@ -154,7 +154,7 @@ def main():
               "Hot samples use repeated calls. Flushed samples average eight individually timed calls after CLFLUSH.",
               "Values are medians of 21 batch samples across three fresh processes; p10/p90 are observed spread.",
               "SDS and raw glibc use the same SDS buffer; raw glibc receives an explicit length.", ""]
-    for cc in ("gcc-14", "clang-19"):
+    for cc in ("clang-19", "gcc-14"):
         folder = out / cc
         folder.mkdir(parents=True, exist_ok=True)
         log = folder / "commands.log"
