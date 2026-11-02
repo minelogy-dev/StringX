@@ -72,7 +72,7 @@ __attribute__((noinline)) uint64_t recheck_sx(recheck_input *f) {
 #elif LIB_INDEX == 1
 __attribute__((noinline)) uint64_t recheck_sds(recheck_input *f) {
   RECORD();
-  sds result = sdscpylen(f->sd, f->pattern, f->m);
+  sds result = sdscpylen(f->sd, (const char *)f->pattern, f->m);
   if (!result) return 0;
   f->sd = result;
   return 1;
