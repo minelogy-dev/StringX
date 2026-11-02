@@ -90,3 +90,14 @@ workflow, and manual dispatch; ordinary library PRs do not run this suite.
 
 Dependencies are fetched separately and retain their original licenses.
 Their source code is not vendored or relicensed by this harness.
+
+
+## Audited rerun of the search gaps
+
+The primary Actions workflow now runs [the audited search recheck](RECHECK.md).
+It retains the suspicious old fixtures as controls and adds independent
+period/phase/length/seed/hit variations, exact call-count verification,
+release disassembly, and hot versus cache-flushed conditions. It reports
+StringX, SDS + glibc, bstrlib, and raw glibc from the same measurements.
+The original run.py and search_diag.py remain available for reproducing their
+documented baseline and diagnostic experiments.
