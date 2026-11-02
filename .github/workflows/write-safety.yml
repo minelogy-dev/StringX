@@ -1,0 +1,80 @@
+name: Write safety and cost
+
+on:
+  pull_request:
+    paths:
+      - 'src/sx_core.c'
+      - 'tests/write_overflow*'
+      - '.github/scripts/check-write-safety.py'
+      - '.github/workflows/write-safety.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: write-safety-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify:
+    name: Reproduce overflow and compare safe writes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install compilers and audit tools
+        timeout-minutes: 5
+        run: |
+          if test -f /etc/apt/apt-mirrors.txt; then
+            printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          fi
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get \
+            -o DPkg::Lock::Timeout=120 -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
+            install --no-install-recommends -y gcc-14 clang-19 libclang-rt-19-dev binutils
+      - name: Check out the unchanged baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 452314a7ca51f90a7a8fa66930947164af8fc4f6
+          path: build/write/before
+          persist-credentials: false
+      - name: Check out the audited measurement harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 7f8a624af4809c9dc606c41533991acd1b51917d
+          path: build/write/harness
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: antirez/sds
+          ref: 5347739b1581fcba74fd5cab1fc21d2aef317d71
+          path: build/write/deps/sds
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: websnarf/bstrlib
+          ref: f0ff1e808102a42cdc7204a4bb6fe231a24c4546
+          path: build/write/deps/bstrlib
+          persist-credentials: false
+      - name: Verify overflow rejection and measure write overhead
+        run: |
+          python3 .github/scripts/check-write-safety.py \
+            --before build/write/before --harness build/write/harness \
+            --deps build/write/deps --out build/write/results
+      - name: Keep evidence and raw samples
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: write-safety-${{ github.run_id }}
+          path: build/write/results
+          retention-days: 14
+          if-no-files-found: ignore
