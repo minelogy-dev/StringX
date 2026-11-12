@@ -12,6 +12,12 @@
 
 并链接 `-lstringx` —— 一个头文件，一个库。
 
+**文档：** 完整手册位于 [`docs/`](docs/README.md) ——
+[快速上手](docs/zh_cn/getting-started.md)、[用户指南](docs/zh_cn/guide.md)、
+[API 参考](docs/zh_cn/api-buffer.md)、[正则](docs/zh_cn/regex.md)、
+[设计](docs/zh_cn/design.md)、[构建与测试](docs/zh_cn/build-and-test.md)。
+英文版见 [`docs/en_us/`](docs/en_us/README.md)。
+
 ## 设计
 
 - **缓冲区模型。** 每个 `sx_t` 拥有一个单 NUL 结尾的缓冲区：
@@ -20,11 +26,11 @@
   内嵌 NUL 是普通数据（二进制安全）。
 - **视图。** `sx_view_t {ref, offset, len}` 是缓冲区某一段的别名：
   **不拷贝、不修改**原串。多数 API 返回视图（`ref == NULL` 哨兵表示"无"）。
-- **分层。** core 层（经 `sx.h` 可达）提供缓冲区、视图、查找、比较、
-  split 等核心操作；adv 层基于 **PCRE2** 提供正则（8 位非 UTF 模式，
-  `\d \w \b …` 仅匹配 ASCII）。
-- **确定性契约。** 每个函数在 `sx.h` 里写明精确的行为边界；非法输入不会
-  崩溃——返回文档化的"未找到/出错"值。
+- **分层。** core 层（经 `sx.h` 可达）提供缓冲区、视图、查找、比较等
+  核心操作；adv 层提供分割（`sx_split`）与基于 **PCRE2** 的正则
+  （8 位非 UTF 模式，`\d \w \b …` 仅匹配 ASCII）。
+- **确定性契约。** 每个函数在 `sx.h` 里写明精确的行为边界：文档化的
+  "未找到/出错"情形返回哨兵值，超出文档边界的输入属于契约之外。
 
 ## 依赖
 
@@ -42,6 +48,8 @@ forge .        # 把 build.c 编译成 ./make（改动 build.c 后需重跑）
 ./make         # 构建 -> build/output/libstringx.so（头文件随附于 build/output/include）
 ./make test    # 编译并运行 tests/ 下每个测试（ASan + UBSan）
 ```
+
+安装、打包与测试框架的完整说明见[构建、测试与打包](docs/zh_cn/build-and-test.md)。
 
 ## 快速上手
 
@@ -110,10 +118,14 @@ sx_reg_free(re);
 | 分隔 | `sx_split(sep)` |
 | 正则 | `sx_reg_compile`, `sx_reg_free`, `sx_reg_is_match`, `sx_reg_match`, `sx_reg_match_all`, `sx_reg_replace`, `sx_reg_replace_first`, `sx_reg_split` |
 
+上表只是索引：[API 参考：缓冲区与视图](docs/zh_cn/api-buffer.md) 与
+[API 参考：查找、比较与分割](docs/zh_cn/api-search.md) 记录了每个函数
+精确的契约。
+
 ## 测试
 
 PR 会自动执行编译、内存检查、静态分析和密钥扫描。
-检查范围与分支保护设置见[持续集成说明](docs/CI.md)。
+检查范围与分支保护设置见[持续集成说明](docs/zh_cn/ci.md)。
 
 ```sh
 ./make test
