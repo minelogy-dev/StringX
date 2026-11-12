@@ -4,10 +4,9 @@ English · [中文](../zh_cn/guide.md)
 
 # User guide
 
-This guide is for C programmers who can already build and link String X (see
-[Getting started](getting-started.md)) and want the mental model plus working
-recipes. Signatures and per-function details live in the API reference; this
-page is about how the pieces fit together and which calls are out of contract.
+For C programmers who can build and link String X (see
+[Getting started](getting-started.md)). Signatures and details are in the API
+reference; this page covers the model, recipes, and out-of-contract calls.
 
 ## Mental model
 
@@ -20,12 +19,10 @@ sx_t* ──► _sx { ptr: [ h e l l o \0 . . . . ] , len: 5, cap: 32 }
 ```
 
 - `ptr[0 .. len-1]` are content bytes; `ptr[len]` is always `'\0'`.
-- `len` is a byte count, never a character count, and it does not stop at an
-  embedded NUL.
+- `len` counts bytes, not characters, and does not stop at an embedded NUL.
 - `cap` is the allocation size in bytes and always satisfies `cap >= len + 1`.
 - `sx_new()` starts with capacity 32; `sx_new_with_cap(n)` has exactly capacity
-  `n` for `n >= 1`, so it can hold at most `n - 1` content bytes (`n == 0`
-  still allocates one byte).
+  `n` for `n >= 1` (`n - 1` content bytes max; `n == 0` still allocates one).
 
 The handle is stable: growth may move the backing array, never the `sx_t`.
 Treat the handle as opaque, and do not copy the struct by value.
@@ -45,8 +42,7 @@ sx_view_t { ref: the same _sx, offset: 1, len: 3 } ──► "ell"
 
 ## Ownership
 
-Exactly one place owns a buffer at a time. The table says what each call
-returns and how to release it.
+One place owns a buffer at a time; per-call result and release:
 
 | Call | Result | Release with |
 | --- | --- | --- |
@@ -58,18 +54,13 @@ returns and how to release it.
 | `sx_view`, `sx_view_*`, `sx_reg_match`, tokens inside the arrays above | view | nothing |
 | `sx_reg_compile` | compiled pattern | `sx_reg_free` |
 
-Two consequences matter in practice:
-
-- Edits return `self`, so they chain: `sx_append_cstr(sx_append_cstr(s, "a"),
-  "b")` returns `s` itself, and the number of `sx_free` calls equals the number
-  of buffers created, not the number of edits.
-- A consuming call ends the source's life. After `sx_append(s, part)`, `part`
-  must not be used or freed again: its content was copied into `s`, and even on
-  allocation failure the source is released.
+- Edits return `self` and chain: `sx_append_cstr(sx_append_cstr(s, "a"), "b")`
+  returns `s`; `sx_free` calls equal buffers created, not edits.
+- A consuming call ends the source: after `sx_append(s, part)`, `part` must not
+  be used or freed again (content copied; released even on allocation failure).
 
 `sx_append_cstr`, `sx_append_view`, `sx_write_cstr`, `sx_write_view`,
-`sx_insert_cstr` and `sx_insert_view` take a C string or a view and never
-consume a buffer.
+`sx_insert_cstr`, `sx_insert_view` take a string or view, never a buffer.
 
 ## Binary safety and the cstr variants
 
@@ -81,33 +72,29 @@ String X is binary-safe wherever an explicit length is carried:
 | `sx_view_t` forms, `sx_new_from_view`, owned `sx_t *` forms | explicit `len` | ordinary byte |
 | regex subject (`sx_t *h`) | byte length of `h` | ordinary byte |
 
-So `sx_append_cstr` stops at a NUL, while `sx_append_view`, `sx_append` and
-`sx_new_from_view` copy every content byte. To print a binary buffer, use the
-length: `fwrite(sx_buf_mut(h), 1, (size_t)sx_len(h), stdout)` rather than
-`printf("%s", ...)`.
+`sx_append_cstr` stops at a NUL; `sx_append_view`, `sx_append` and
+`sx_new_from_view` copy every content byte. Print a binary buffer by length:
+`fwrite(sx_buf_mut(h), 1, (size_t)sx_len(h), stdout)`, not `printf("%s", ...)`.
 
-The same split applies to compare and search: the `_cstr` forms use `strlen`,
-while the owned and view forms compare content bytes. Regular expressions match
-subjects by byte length, but their patterns are C strings, so a pattern cannot
-contain a literal NUL.
+The same split applies to compare and search: `_cstr` forms use `strlen`, owned
+and view forms compare content bytes. Regex subjects match by byte length;
+patterns are C strings, so a pattern cannot contain a literal NUL.
 
 ## Invariants and stale pointers
 
 - After every public call, `ptr[len] == '\0'`, `cap >= len + 1`, and `len`
   counts content bytes. Only a length-changing call moves those values.
-- Any edit that grows the buffer may `realloc` the backing array. Every `char *`
-  obtained from `sx_buf_mut` or `sx_buf_view_mut` before that call is then
-  stale; re-fetch it after the edit. The `sx_t *` handle stays valid.
+- Any growing edit may `realloc` the backing array; every `char *` from
+  `sx_buf_mut`/`sx_buf_view_mut` is then stale — re-fetch it. The `sx_t *`
+  handle stays valid.
 - Writes through `sx_buf_mut` must stay inside `[0, len)` unless a matching
   length-changing call follows; `ptr[len]` is the terminator, not a spare byte.
-- Views are snapshots. Do not edit a buffer while views into it (or arrays of
-  tokens from `sx_split` / `sx_reg_*`) are alive, and re-derive views after a
-  length change even when no reallocation happened.
+- Views are snapshots: do not edit a buffer while its views (or `sx_split` /
+  `sx_reg_*` arrays) are alive; re-derive views after any length change.
 - Accessors return `int` (`sx_len`, `sx_len_view`, `sx_cap`) while offsets are
   `size_t`. Buffers with more than `INT_MAX` content bytes are outside the
   tested contract.
-- Capacity only grows: `sx_truncate`, `sx_erase` and `sx_clear` free no
-  capacity.
+- Capacity only grows: `sx_truncate`, `sx_erase`, `sx_clear` free nothing.
 
 ## Errors and sentinels
 
@@ -121,6 +108,7 @@ There are no exceptions and no error codes. Each family has a sentinel:
 | `sx_reg_match`: no match | view with `ref == NULL` |
 | `sx_reg_match_all` / `sx_reg_split`: no match or allocation failure | `NULL` array |
 | `sx_reg_replace*`: NULL argument or rejected template | `NULL` buffer |
+| `sx_write*`: range end overflows `size_t` or cannot be reserved | `NULL`; `self` unchanged (owned input consumed) |
 | allocation failure | `NULL` |
 
 `NULL` means "no result"; for the array-returning calls, allocation failure is
@@ -130,24 +118,25 @@ narrow:
 - `sx_new_from_cstr(NULL)` and `sx_dup(NULL)` return `NULL`.
 - The C-string and owned-buffer arguments of append/write/insert return `NULL`
   and leave `self` unchanged.
+- `sx_write*` returns `NULL` when `idx + len` overflows `size_t` or the end
+  cannot be reserved; `self` keeps its content and an owned argument is still
+  freed.
 - `sx_cmp*`, `sx_starts_with*` and `sx_ends_with*` return `0`.
 - `sx_find*` / `sx_rfind*` return `(size_t)-1`; `sx_find_all*` return `NULL`.
-- `sx_split` returns `NULL` for a NULL handle, NULL separator or empty
-  separator.
+- `sx_split` returns `NULL` for a NULL handle/separator or an empty separator.
 - `sx_reg_compile(NULL)` returns `NULL`; `sx_reg_free(NULL)` is a no-op; the
   match, replace and split families return their not-found value for NULL
   arguments.
 
-Everything else does not accept a NULL handle. `sx_len`, `sx_cap`,
-`sx_buf_mut`, `sx_view`, `sx_free`, `sx_substr`, `sx_reserve`, `sx_erase` and
-the rest dereference the handle; passing NULL is out of contract and may crash.
-In particular, `sx_free(NULL)` is not a no-op, and a view with `ref == NULL`
-cannot be passed to the view functions.
+Everything else rejects NULL handles: `sx_len`, `sx_cap`, `sx_buf_mut`,
+`sx_view`, `sx_free`, `sx_substr`, `sx_reserve`, `sx_erase` and the rest
+dereference it, so NULL is out of contract and may crash. `sx_free(NULL)`
+is not a no-op, and a `ref == NULL` view cannot be passed to view functions.
 
 ## Recipes
 
-Each recipe is a complete C23 program. Build one with the command used for
-`hello.c` in [Getting started](getting-started.md), or with:
+Each recipe is a complete C23 program; build it like `hello.c` in
+[Getting started](getting-started.md), or with:
 
 ```sh
 cc recipe.c $(pkg-config --cflags --libs libstringx) -o recipe
@@ -180,9 +169,8 @@ int main(void) {
 
 ### Search and extract a substring
 
-Check the `(size_t)-1` sentinel before using an offset. `sx_substr` copies, so
-its result is independent of the source, and `sx_find_view_b` restricts the
-search to a region starting at a boundary.
+Check the `(size_t)-1` sentinel before using an offset. `sx_substr` copies
+(independent result); `sx_find_view_b` searches only the region from a boundary.
 
 ```c
 #include <sx.h>
@@ -216,9 +204,9 @@ key=key value=value
 
 ### Split and iterate
 
-`sx_split` returns a malloc'ed array of views terminated by an end guard whose
-`ref` is `NULL`; empty fields are kept. Free the array with `free`, and keep the
-buffer alive while you read the tokens.
+`sx_split` returns a malloc'ed view array whose end guard has `ref == NULL`;
+empty fields are kept. `free` the array; keep the buffer alive while reading
+tokens.
 
 ```c
 #include <sx.h>
@@ -368,17 +356,19 @@ documented edge cases that are easy to miss:
 
 - Using a buffer after handing it to a consuming call: `sx_append(s, part)`,
   `sx_write(s, idx, part)` and `sx_insert(s, idx, part)` free `part`.
-- Passing a buffer to itself through the owned forms: `sx_append(s, s)`,
-  `sx_write(s, idx, s)`, `sx_insert(s, idx, s)`. To double a buffer in place,
-  use `sx_append_view(s, sx_view(s))` and `sx_write_view`; they accept a view
-  into `s`. `sx_insert_view` also accepts one when the slice starts at or
-  before `idx` (the tested case); a self-aliased slice that starts after `idx`
-  is overwritten by the tail shift — copy it first.
+- Passing a buffer to itself via the owned forms (`sx_append(s, s)`,
+  `sx_write(s, idx, s)`, `sx_insert(s, idx, s)`) is out of contract, and
+  doubling in place uses `sx_append_view(s, sx_view(s))` or `sx_write_view`;
+  `sx_insert_view` accepts a view into `s` only when the slice starts at or
+  before `idx` (the tested case); a slice starting after `idx` is clobbered by
+  the tail shift — copy it first.
 - `sx_insert*` with `idx > len`: the tail shift underflows. The tested contract
   is `0 <= idx <= len`. `sx_write*` is different: it pads and extends.
-- Reading the unspecified bytes in `[old_len, n)` after a growing
-  `sx_truncate`, or in `[len, idx)` after `sx_write` beyond the end. Write over
-  the gap before reading it.
+- Reading unspecified bytes in `[old_len, n)` after a growing `sx_truncate`
+  or `[len, idx)` after an out-of-range `sx_write`; write the gap first.
+- Calling `sx_write*` with an `idx + len` near `SIZE_MAX` and assuming the
+  write happened: arithmetic overflow is rejected with `NULL` and `self` stays
+  unchanged. Check the return value.
 - Editing a buffer while views or arrays from `sx_split`, `sx_reg_match_all`,
   `sx_reg_split` or `sx_find_all*` are alive, or keeping a view past a length
   change. Views are not adjusted and may point into freed memory after growth.
@@ -386,32 +376,29 @@ documented edge cases that are easy to miss:
   `{count, positions...}`.
 - Treating `sx_erase` with `idx + n > len` as an error. It is a documented no-op
   that returns `self`.
-- Passing NULL handles to functions that do not check for them (see
-  [Errors and sentinels](#errors-and-sentinels)). `sx_free(NULL)` and
-  `sx_len(NULL)` are out of contract.
+- Passing NULL handles to functions that do not check for them: `sx_free(NULL)`
+  and `sx_len(NULL)` are out of contract — see
+  [Errors and sentinels](#errors-and-sentinels).
 - Forgetting the release call: `sx_free` for buffers, `free` for view arrays,
   `sx_reg_free` for compiled patterns. A view needs no release.
-- `sx_split` with an empty separator returns `NULL`; it does not split on every
-  byte.
+- `sx_split` with an empty separator returns `NULL`, not one token per byte.
 - A regex pattern is a C string and cannot contain a literal NUL. Subjects can.
 - `sx_new_from_cstr` and every `_cstr` parameter stop at the first NUL; use
   views for binary content.
 - `sx_substr` requires `idx + n <= len(h)`; `sx_view_range` requires
   `off <= len(backing buffer)` (its `len` is clamped to the buffer end, `off` is
   not). Neither call clamps the precondition itself.
-- Sharing one `sx_t` between threads without synchronization. The library has no
-  internal locking; a compiled `sx_reg_t` is the only object documented as
-  immutable and shareable.
+- Sharing one `sx_t` across threads without synchronization: no internal
+  locking; only a compiled `sx_reg_t` is documented as immutable and shareable.
 
 ## Performance notes
 
-- **Reserve before a known append loop.** `sx_reserve(self, n)` guarantees
-  `cap >= n + 1` without shrinking, so a buffer can reach `n` content bytes
-  without reallocating. Without it, growth is still amortized: the allocation
-  doubles, or grows by `0x10000` once the capacity is at least 64 KiB.
+- **Reserve for known append loops.** `sx_reserve(self, n)` guarantees
+  `cap >= n + 1` without shrinking, so `n` content bytes fit without realloc;
+  otherwise growth is amortized — doubling, then `+0x10000` at 64 KiB and up.
 - **Views do not copy.** `sx_view`, `sx_view_advance` and the other view movers
-  are O(1) and allocate nothing. Prefer them for read-only slicing; use
-  `sx_substr` or `sx_new_from_view` only when you need an independent buffer.
+  are O(1) and allocate nothing; use `sx_substr`/`sx_new_from_view` only for an
+  independent buffer.
 - **Search is linear.** One-byte needles use `memchr` / `memrchr`; longer
   needles use forward or reverse KMP, O(n + m). `sx_find_all*` reports
   overlapping matches and sizes its array to the match count.
@@ -421,15 +408,14 @@ documented edge cases that are easy to miss:
   replace and split reuses the compiled pattern and allocates only its own match
   data. `sx_reg_is_match` is the cheapest existence check.
 - **Capacity is never returned.** `sx_truncate`, `sx_erase` and `sx_clear` keep
-  the allocation, which makes a cleared buffer reusable but means a peak stays
-  allocated until `sx_free`.
+  the allocation: a cleared buffer is reusable, but a peak stays allocated until
+  `sx_free`.
 
 ## FAQ
 
-**Do I need PCRE2 to use buffers?** To build the library, yes: the source tree
-links `pcre2-8`, and `./make` needs `libpcre2-dev`. To use an installed
-`libstringx`, link only `-lstringx`; the shared library carries its own PCRE2
-dependency.
+**Do I need PCRE2 to use buffers?** To build, yes: the source tree links
+`pcre2-8` and `./make` needs `libpcre2-dev`. An installed `libstringx` needs
+only `-lstringx`; the shared library carries the PCRE2 dependency.
 
 **Is every function NULL-safe?** No. Only the cases listed in
 [Errors and sentinels](#errors-and-sentinels) are defined; NULL handles are out
@@ -442,8 +428,8 @@ so `\d`, `\w`, `\s` and `\b` match ASCII only.
 **How do I copy a view?** `sx_new_from_view(v)` returns an owned buffer with a
 byte-exact copy of the view's `len` bytes.
 
-**How do I get a substring?** `sx_view_range` and `sx_view_advance` give a
-zero-copy view; `sx_substr(h, idx, n)` gives an owned copy.
+**How do I get a substring?** `sx_view_range`/`sx_view_advance` give a zero-copy
+view; `sx_substr(h, idx, n)` gives an owned copy.
 
 **Why does `sx_len` return `int`?** That is the library's practical size limit:
 content longer than `INT_MAX` bytes is outside the tested contract. Offsets are
@@ -455,7 +441,7 @@ between threads is not supported.
 
 **What does a zero-length match look like?** `sx_reg_match` returns a view with
 `ref != NULL` and `len == 0`; `sx_reg_match_all` and `sx_reg_split` report it
-and continue the scan one byte to the right.
+and scan one byte on.
 
 ---
 

@@ -4,13 +4,10 @@ English · [中文](../zh_cn/getting-started.md)
 
 # Getting started
 
-String X is a small C23 string library that treats one string as a single
-NUL-terminated buffer and every slice of it as a zero-copy view. Buffers are
-handled by byte length, so embedded NUL bytes are ordinary data and nothing is
-lost to C-string truncation. The public surface is one header, `<sx.h>`, and
-one library, `libstringx` (`-lstringx`); an optional advanced layer adds
-regular expressions through PCRE2. This page takes you from a fresh checkout
-to a running program. It describes **v0.5**.
+String X is a small C23 string library: one NUL-terminated buffer per string,
+zero-copy views as slices, byte-length handling (embedded NULs are ordinary
+data). One header `<sx.h>`, one library `libstringx` (`-lstringx`); an optional
+PCRE2 layer adds regexes. Version: **v0.5**.
 
 ## Requirements
 
@@ -18,23 +15,22 @@ to a running program. It describes **v0.5**.
 | --- | --- |
 | Linux | Tested platform; the build and tests target Linux |
 | C23 compiler | GCC 14+ or Clang 19+; CI runs GCC 14 and Clang 19 on Ubuntu 24.04 |
-| `forge` | `https://github.com/minelogy-dev/forge`; compiles `build.c` into a local `./make` executable |
+| `forge` | [github.com/minelogy-dev/forge](https://github.com/minelogy-dev/forge) |
 | `libpcre2-dev` | PCRE2 10.46, 8-bit API; needed to build; the library links `pcre2-8` |
 | `pkg-config` | Recommended for consumers; the installed package ships `libstringx.pc` |
 
 ## Build from source
 
 ```sh
-forge .        # compile build.c into ./make (re-run whenever build.c changes)
+forge .        # generate ./make
 ./make         # build -> build/output/libstringx.so
 ./make test    # build and run every test under tests/ (ASan + UBSan + LSan)
 ```
 
-`./make` also syncs the public headers to `build/output/include`. `./make test`
-runs each `tests/*.c` file as a self-contained program under AddressSanitizer,
-UBSan and LeakSanitizer; use `./make test -j 2` to run tests in parallel.
-`build.conf` selects the compiler and is the single source of truth for the
-version.
+`./make` syncs the public headers to `build/output/include`; `./make test` runs
+every `tests/*.c` as a self-contained program under AddressSanitizer, UBSan and
+LeakSanitizer (`-j 2` parallelizes). `build.conf` selects the compiler and is
+the single source of truth for the version.
 
 ## Install
 
@@ -58,8 +54,8 @@ The install target builds first, then copies the artifacts:
 cc app.c $(pkg-config --cflags --libs libstringx) -o app
 ```
 
-For a prefix that is not in the default search path, point pkg-config at the
-installed metadata and, for a non-system prefix, set the runtime library path:
+For a non-default prefix, point pkg-config at the installed metadata and set the
+runtime library path:
 
 ```sh
 export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig"
@@ -73,9 +69,8 @@ Without pkg-config, the same build is:
 cc app.c -I<prefix>/include -L<prefix>/lib -lstringx -o app
 ```
 
-You link only `-lstringx`: `libstringx` links `pcre2-8` itself, so no extra
-library flags are needed. The shared library does need `libpcre2-8` present at
-run time.
+Link only `-lstringx`: `libstringx` links `pcre2-8` itself, so no extra library
+flags are needed; the shared library still needs `libpcre2-8` at run time.
 
 ### Debian package
 
@@ -84,29 +79,29 @@ run time.
 sudo apt install ./build/deb/libstringx_0.5_amd64.deb
 ```
 
-`gen_deb` stages `build/deb/libstringx_<version>_<arch>.deb`; the version comes
-from `build.conf` with the leading `v` stripped, and the architecture from
-`uname -m` (`x86_64` becomes `amd64`, `aarch64` becomes `arm64`). The package
-depends on `libc6` and `libpcre2-8-0`.
+`gen_deb` stages `build/deb/libstringx_<version>_<arch>.deb`: version from
+`build.conf` without the leading `v`, architecture from `uname -m` (`x86_64` →
+`amd64`, `aarch64` → `arm64`); it depends on `libc6` and `libpcre2-8-0`.
 
 ## Hello, String X
 
-This is the quick-start program from the README. It copies a C string into an
-owned buffer, finds the first comma, copies the text before it into a second
-owned buffer, and prints that. Both buffers are released with `sx_free`.
+The README quick start. Every edit returns the same handle, so the whole
+chain is one expression; `sx_append` consumes the temporary buffer, and the
+result needs one `sx_free`. The handle survives growth, and the buffer is
+NUL-terminated after every call.
 
 ```c
 #include <sx.h>
 #include <stdio.h>
 
 int main(void) {
-  sx_t *msg = sx_new_from_cstr("hello, world");
-  size_t at = sx_find_cstr(msg, ", ");
-  sx_t *hi = sx_substr(msg, 0, at);
-  fwrite(sx_buf_mut(hi), 1, (size_t)sx_len(hi), stdout);
-  putchar('\n');                        /* hello */
-  sx_free(hi);
-  sx_free(msg);
+  /* One expression: every call returns the same handle, and the temporary
+     buffer is consumed by sx_append, so there is nothing else to free. */
+  sx_t *msg = sx_append(sx_append_cstr(sx_new(), "Hello, "),
+                        sx_new_from_cstr("String X!"));
+
+  printf("%s (%d bytes)\n", sx_buf_mut(msg), sx_len(msg));
+  sx_free(msg);   /* one buffer, one free */
   return 0;
 }
 ```
@@ -119,7 +114,7 @@ cc hello.c $(pkg-config --cflags --libs libstringx) -o hello
 ```
 
 ```text
-hello
+Hello, String X! (16 bytes)
 ```
 
 From the source tree, before installing, use the build output instead:
@@ -131,8 +126,7 @@ LD_LIBRARY_PATH=build/output ./hello
 
 ## Ten-minute tour
 
-Five things users do with the library, one small program each. Every example
-is complete and can be compiled the same way as `hello.c` above.
+Five common tasks, one complete program each, compiled like `hello.c`.
 
 ### Create a buffer
 
@@ -297,7 +291,7 @@ byte, including NUL.
 | [API reference: search, compare & split](api-search.md) | `sx_find*`, `sx_rfind*`, `sx_cmp*`, `sx_split` |
 | [Regular expressions](regex.md) | The `sx_reg_*` match, replace and split families |
 | [Design & internals](design.md) | Data layout, growth policy, algorithms, limits |
-| [Build, test & package](build-and-test.md) | Forge targets, test harness, installation |
+| [Build, test & package](build-and-test.md) | build targets, test harness, installation |
 | [Contributing](contributing.md) | Workflow, style, tests, licensing |
 | [Continuous integration](ci.md) | Workflows, required checks, CodeQL |
 

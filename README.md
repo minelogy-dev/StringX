@@ -40,8 +40,7 @@ The Chinese edition is under [`docs/zh_cn/`](docs/zh_cn/README.md).
 ## Requirements
 
 - A C23 compiler (GCC and Clang), Linux
-- The `forge` build tool to build from source (https://github.com/minelogy-dev/forge —
-  a custom build system; the tool compiles `build.c` into a local `./make` entry)
+- [Forge](https://github.com/minelogy-dev/forge) to build from source
 - `libpcre2-dev` (PCRE2 8-bit) — the regex layer's dependency; the shared
   library links `pcre2-8` itself, so consumers only need `-lstringx`
 - `pkg-config` (or `pkgconf`) recommended for consumers — the installed
@@ -50,7 +49,7 @@ The Chinese edition is under [`docs/zh_cn/`](docs/zh_cn/README.md).
 ## Build
 
 ```sh
-forge .        # compile build.c into ./make (re-run whenever build.c changes)
+forge .        # generate ./make
 ./make         # build -> build/output/libstringx.so (+ headers at build/output/include)
 ./make test    # build and run every test under tests/ (ASan + UBSan)
 ```
@@ -60,21 +59,27 @@ packaging and the test harness.
 
 ## Quick start
 
+Edits return the handle they were given, so the whole chain is one
+expression: `sx_append` consumes its `sx_t *` argument, and one `sx_free`
+releases everything.
+
 ```c
 #include <sx.h>
 #include <stdio.h>
 
 int main(void) {
-  sx_t *msg = sx_new_from_cstr("hello, world");
-  size_t at = sx_find_cstr(msg, ", ");
-  sx_t *hi = sx_substr(msg, 0, at);
-  fwrite(sx_buf_mut(hi), 1, (size_t)sx_len(hi), stdout);
-  putchar('\n');                        /* hello */
-  sx_free(hi);
-  sx_free(msg);
+  /* One expression: every call returns the same handle, and the temporary
+     buffer is consumed by sx_append, so there is nothing else to free. */
+  sx_t *msg = sx_append(sx_append_cstr(sx_new(), "Hello, "),
+                        sx_new_from_cstr("String X!"));
+
+  printf("%s (%d bytes)\n", sx_buf_mut(msg), sx_len(msg));
+  sx_free(msg);   /* one buffer, one free */
   return 0;
 }
 ```
+
+It prints `Hello, String X! (16 bytes)`.
 
 Compile with (manually, or via pkg-config):
 

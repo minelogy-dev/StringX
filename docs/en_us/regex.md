@@ -6,28 +6,27 @@ English · [中文](../zh_cn/regex.md)
 
 ## Overview
 
-`<sx.h>` adds one advanced layer on top of the core buffer API: a thin,
-fixed-configuration wrapper around the **PCRE2 8-bit library** (`pcre2-8`,
-version 10.46). It exposes a compile/free pair and three families — match,
-replace and split — and deliberately adds no policy of its own: everything
-this page does not state is PCRE2's default behavior.
+`<sx.h>` adds an advanced layer: a thin, fixed-configuration wrapper around
+the **PCRE2 8-bit library** (`pcre2-8`, version 10.46). It provides a
+compile/free pair and three families — match, replace and split — and adds no
+policy: anything not stated here is PCRE2's default.
 
-The layer is designed around one lifecycle:
+The lifecycle:
 
 1. compile a pattern into an opaque `sx_reg_t *` handle;
 2. run any number of calls against any number of `sx_t` subjects;
 3. release the handle once with `sx_reg_free`.
 
-A compiled handle is immutable and may be shared across threads; every call
-uses its own match data. Subjects are matched by **byte length**, so an
-embedded NUL is ordinary data (binary safe); patterns and replacement
-templates are C strings and cannot contain a literal NUL.
+A compiled handle is immutable and shareable across threads; each call uses
+its own match data. Subjects are matched by **byte length**, so an embedded NUL
+is ordinary data (binary safe); patterns and replacement templates are C
+strings and cannot contain a literal NUL.
 
-The layer is part of `libstringx`, which links `pcre2-8` itself: consumers
-link `-lstringx` and pass no PCRE2 flags. PCRE2 is BSD-3-Clause; attribution
-lives in [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md). For the
-`$n` substitution rules see [Substitution templates](#substitution-templates);
-for a task-oriented tour see the [user guide](guide.md).
+The layer is part of `libstringx`, which links `pcre2-8`: consumers link
+`-lstringx` and pass no PCRE2 flags. PCRE2 is BSD-3-Clause; see
+[THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md). For `$n` substitution
+see [Substitution templates](#substitution-templates); for task recipes see the
+[user guide](guide.md).
 
 The families at a glance:
 
@@ -40,10 +39,9 @@ The families at a glance:
 
 ## Lifecycle
 
-Compile the pattern once, before the loop that uses it, and keep the handle.
-The pattern string itself is not retained, so it can be freed right after
-compilation. When the handle is no longer needed, release it with
-`sx_reg_free`.
+Compile the pattern once before the loop that uses it. The pattern string is
+not retained, so free it after compilation; release the handle with
+`sx_reg_free` when done.
 
 ```c
 #include <sx.h>
@@ -94,14 +92,14 @@ int main(void) {
 }
 ```
 
-The three points that make the API safe to use in long-lived code are:
+Three properties keep it safe in long-lived code:
 
-- the handle is independent of the subjects: one compiled pattern serves any
-  number of buffers;
-- results that alias a subject are views, so they stay valid only while that
-  subject lives and keeps its length;
-- arrays returned by `sx_reg_match_all` and `sx_reg_split` are
-  caller-owned: release them with `free()`, not `sx_free`.
+- The handle is independent of subjects: one compiled pattern serves any
+  number of buffers.
+- Results that alias a subject are views, valid only while that subject lives
+  and keeps its length.
+- Arrays from `sx_reg_match_all` and `sx_reg_split` are caller-owned: release
+  them with `free()`, not `sx_free`.
 
 ### sx_reg_compile
 
@@ -115,18 +113,16 @@ Compiles a pattern with PCRE2 and returns an opaque handle.
 | --- | --- |
 | `pattern` | NUL-terminated PCRE2 pattern; not retained by the handle |
 
-Returns a new handle, or `NULL` when `pattern` is `NULL`, the pattern is
-syntactically invalid, or allocation fails. The wrapper exposes no PCRE2
-error code or error offset, so these cases cannot be told apart: validate a
-pattern during development and treat `NULL` as "do not use this handle".
+Returns a new handle, or `NULL` for a `NULL` pattern, invalid syntax or
+allocation failure. The wrapper exposes no PCRE2 error code or offset, so these
+cases are indistinguishable: validate patterns during development and treat
+`NULL` as unusable.
 
-Notes:
-
-- The pattern string may be freed or modified immediately after the call.
-- No compile options are passed to PCRE2. PCRE2 features selected inside the
-  pattern itself (an inline option such as `(?i)`) still apply.
-- Compilation is the expensive step of the layer relative to a single match
-  call, so compile once and reuse the handle ([performance](#performance)).
+- The pattern string can be freed or modified immediately after the call.
+- No compile options are passed. Features selected inside the pattern, such as
+  inline `(?i)`, still apply.
+- Compilation is the expensive step, so compile once and reuse the handle
+  ([performance](#performance)).
 
 ```c
 sx_reg_t *re = sx_reg_compile("(\\w+)@(\\w+)"); /* NULL on bad input */
@@ -143,12 +139,10 @@ void sx_reg_free(sx_reg_t *r);
 
 Releases a compiled handle. `NULL` is accepted and is a no-op.
 
-Notes:
-
-- Free a handle exactly once, after the last call that uses it.
-- Data returned by earlier calls does not depend on the handle: match views
-  alias the subject, and arrays are caller-owned.
-- Using a freed handle again is out of contract.
+- Free a handle exactly once, after its last use.
+- Earlier results do not depend on the handle: match views alias the subject
+  and arrays are caller-owned.
+- Reusing a freed handle is out of contract.
 
 ```c
 sx_reg_free(re); /* release the handle after its last use */
@@ -156,11 +150,10 @@ sx_reg_free(re); /* release the handle after its last use */
 
 ## Match family
 
-All three calls scan the subject's content bytes from the left and follow
-PCRE2's **leftmost-first** semantics: the match that starts earliest wins,
-and among alternatives that start at the same byte PCRE2's preference order
-decides. A zero-length match is a real match. Views alias the subject: no
-bytes are copied and `h` is never modified.
+All three calls scan content bytes from the left with PCRE2's
+**leftmost-first** semantics: the earliest start wins; same-start alternatives
+follow PCRE2's order. A zero-length match is a real match. Views alias the
+subject and `h` is never modified.
 
 ### sx_reg_is_match
 
@@ -175,15 +168,12 @@ Answers "does the pattern match anywhere in `h`?".
 | `r` | compiled pattern |
 | `h` | subject buffer |
 
-Returns `1` if some match exists anywhere in `h`, otherwise `0` — including
-when `r` or `h` is `NULL`, or when an internal allocation fails. A
-zero-length match counts as a match, so `a*` matches an empty subject.
+Returns `1` if a match exists anywhere in `h`, otherwise `0` — including for
+`NULL` `r`/`h` or internal allocation failure. A zero-length match counts, so
+`a*` matches an empty subject.
 
-Notes:
-
-- The cheapest existence test: one PCRE2 match call and no result
-  allocation. Each call still creates and frees its own small PCRE2
-  match-data block.
+- The cheapest existence test: one PCRE2 match call and no result allocation;
+  each call still creates and frees a small PCRE2 match-data block.
 - The subject is searched by byte length; anchors refer to byte offsets.
 
 ```c
@@ -207,22 +197,19 @@ Returns the leftmost match as a view into `h`.
 | `r` | compiled pattern |
 | `h` | subject buffer |
 
-On success the result is a view into `h`'s buffer: `.ref` points at the
-subject, and `.offset` / `.len` select the matched bytes. No match, a `NULL`
-argument, or allocation failure returns the null view
-`{ref = NULL, offset = 0, len = 0}`. A zero-length match is still a match:
-`.ref != NULL` with `.len == 0`.
+On success the result is a view into `h`: `.ref`, `.offset` and `.len` select
+the matched bytes. No match, a `NULL` argument or allocation failure returns the
+null view `{ref = NULL, offset = 0, len = 0}`; a zero-length match still has
+`.ref != NULL` and `.len == 0`.
 
-Notes:
-
-- Leftmost match, not "the longest match": alternatives prefer PCRE2's
-  order, so `b|bc` against `abc` matches `b` at offset 1.
+- Leftmost, not longest: alternatives follow PCRE2's order, so `b|bc` against
+  `abc` matches `b` at offset 1.
 - One PCRE2 match call; the view is not a copy.
 - Anchors follow PCRE2's defaults: `^` matches at the subject start
   (offset 0) and `$` at the subject end; by default `$` also matches before
   a final newline.
-- Using the view after `h` is freed, or after an edit changes `h`'s length,
-  is out of contract.
+- Using the view after `h` is freed or its length changes is out of
+  contract.
 
 ```c
 sx_reg_t *re = sx_reg_compile("bc");
@@ -245,24 +232,18 @@ Collects every match in one left-to-right pass.
 | `r` | compiled pattern |
 | `h` | subject buffer |
 
-Returns a `malloc`'ed array of views with the same shape as `sx_split`:
-`arr[0 .. count-1]` are the matches and `arr[count].ref == NULL` is the end
-guard. Release the array with `free()`; the views alias `h` and stay valid
-while `h` lives and keeps its length.
+Returns a `malloc`'ed array with the `sx_split` shape: `arr[0 .. count-1]`
+are matches and `arr[count].ref == NULL` is the end guard. Release it with
+`free()`; views alias `h` while `h` lives and keeps its length. No match, a
+`NULL` argument or allocation failure returns `NULL` — indistinguishable by
+this API.
 
-Returns `NULL` when there is no match at all, when `r` or `h` is `NULL`, or
-when allocation fails. These three cases are not distinguishable by this
-API.
-
-Notes:
-
-- Matches do not overlap: after each match the scan resumes at the match end,
-  or one byte further right for a zero-length match
-  ([the scan rule](#the-scan-rule)).
-- Counting and filling are two passes over the same deterministic scan, so
-  the array is allocated exactly once at its final size.
-- `sx_find_all*` reports overlapping positions instead; `sx_reg_match_all`
-  reports regex matches, which cannot overlap.
+- Matches do not overlap: after each match the scan resumes at its end, or one
+  byte right for a zero-length match ([the scan rule](#the-scan-rule)).
+- Counting and filling are two passes over the same deterministic scan, so the
+  array is allocated once at final size.
+- `sx_find_all*` reports overlapping positions instead; regex matches cannot
+  overlap.
 
 ```c
 sx_reg_t *re = sx_reg_compile("a*");
@@ -283,8 +264,7 @@ sx_reg_free(re);
 - matches are taken left to right and never overlap;
 - after a match the next search starts at the match's end;
 - after a zero-length match the next search starts **one byte to the right**
-  of the match start, so a pattern that can match empty cannot stall the
-  scan;
+  of the match start, so an empty-matching pattern cannot stall the scan;
 - a match may end exactly at `len(h)` (for example `$`); the scan then
   stops because PCRE2 rejects a start offset beyond the subject.
 
@@ -295,14 +275,14 @@ sx_reg_free(re);
 | `$` | `abc` | (3,0) |
 | `bc` | `abcb` | (1,2) |
 
-The same rule determines the token count of `sx_reg_split`: it is always
+The same rule fixes the `sx_reg_split` token count: always
 `number_of_matches + 1`.
 
 ## Replace family
 
-Both replace calls substitute a C-string template into the match(es) and
-return a **new** caller-owned `sx_t`; `h` is never modified. Free the result
-with `sx_free`, like any other buffer.
+Both replace calls substitute a C-string template into matches and return a
+**new** caller-owned `sx_t`; `h` is never modified. Free the result with
+`sx_free` like any other buffer.
 
 ### sx_reg_replace
 
@@ -318,18 +298,16 @@ Replaces every match in `h` with `repl`.
 | `h` | subject buffer; never modified |
 | `repl` | NUL-terminated substitution template; not retained |
 
-Returns a new buffer, or `NULL` when `r`, `h` or `repl` is `NULL`, PCRE2
-rejects the template, or allocation fails. With valid arguments and no match
-the result is an **unchanged copy** of `h`, never `NULL`.
-
-Notes:
+Returns a new buffer, or `NULL` for a `NULL` argument, a template PCRE2
+rejects, or allocation failure. With valid arguments and no match, the result
+is an **unchanged copy** of `h`, never `NULL`.
 
 - The template expands `$0` / `$n`; see
   [Substitution templates](#substitution-templates).
 - Zero-length matches are substituted too: `a*` against `bbb` with the
   template `-` yields `-b-b-b-`.
-- An empty template deletes every match, so a pattern that matches the whole
-  subject produces an empty buffer.
+- An empty template deletes every match; a whole-subject match therefore
+  yields an empty buffer.
 - Byte-exact: embedded NULs in `h` are ordinary matching data and are copied
   into the result.
 
@@ -349,8 +327,8 @@ sx_t *sx_reg_replace_first(const sx_reg_t *r, const sx_t *h,
                            const char *repl);
 ```
 
-Same contract as `sx_reg_replace`, except that only the **leftmost** match is
-substituted; every other byte is copied unchanged.
+Same contract as `sx_reg_replace`, but only the **leftmost** match is
+substituted; all other bytes are copied unchanged.
 
 ```c
 sx_reg_t *re = sx_reg_compile("x");
@@ -363,8 +341,8 @@ sx_reg_free(re);
 
 ## Substitution templates
 
-Both replace calls interpret `repl` with PCRE2's substitution syntax, with
-two options fixed by the wrapper that make missing captures harmless.
+Both replace calls use PCRE2's substitution syntax for `repl`, with two
+wrapper-fixed options that make missing captures harmless.
 
 | Template element | Expands to |
 | --- | --- |
@@ -379,17 +357,15 @@ two options fixed by the wrapper that make missing captures harmless.
 | `a(b)?` | `a` | `[$1]` | `[]` |
 | `abc` | `abc` | (empty template) | (empty buffer) |
 
-Notes:
-
-- The wrapper passes PCRE2's `PCRE2_SUBSTITUTE_UNSET_EMPTY` and
-  `PCRE2_SUBSTITUTE_UNKNOWN_UNSET`: a group that did not participate, and a
-  group number that does not exist, both expand to the empty string. A
-  template is therefore never rejected just because a capture is missing.
-- `$n` refers to capture groups of each match as it is substituted; group 0
-  is the whole match.
-- `repl` is a C string, so a literal NUL cannot appear in it. Matched NUL
+- The wrapper sets `PCRE2_SUBSTITUTE_UNSET_EMPTY` and
+  `PCRE2_SUBSTITUTE_UNKNOWN_UNSET`: a group that did not participate and a
+  non-existent group number both expand to empty, so a template is never
+  rejected merely for a missing capture.
+- `$n` refers to each match's own capture groups; group 0 is the whole
+  match.
+- `repl` is a C string, so a literal NUL cannot appear in it; matched NUL
   bytes still reach the result through `$0` / `$n`.
-- The full substitution syntax is PCRE2's; see the
+- The full syntax is PCRE2's; see the
   [PCRE2 documentation](https://www.pcre.org/).
 
 ## Split family
@@ -407,22 +383,18 @@ Splits `h` into the gaps between non-overlapping matches.
 | `r` | compiled pattern |
 | `h` | subject buffer |
 
-Returns a `malloc`'ed array with exactly the `sx_split` shape:
-`arr[0 .. count-1]` are the tokens in order, `arr[count].ref == NULL` is the
-end guard, and `count == number_of_matches + 1`. Empty tokens are kept at
-every edge and in the interior. The caller frees the array with `free()`; the
-tokens are views into `h`.
+Returns a `malloc`'ed array with the `sx_split` shape: tokens in order at
+`arr[0 .. count-1]`, end guard `arr[count].ref == NULL`, and
+`count == number_of_matches + 1`. Empty tokens are kept at every edge and in
+the interior; free the array with `free()`; tokens are views into `h`. `NULL`
+on a `NULL` argument or allocation failure. No match is not an error: the whole
+subject is the single token.
 
-Returns `NULL` for a `NULL` argument or allocation failure. No match is not
-an error: the array then contains the whole subject as its single token.
-
-Notes:
-
-- Zero-length matches split at every position: `a*` against `bbb` gives
-  `""`, `"b"`, `"b"`, `"b"`, `""` — five tokens.
-- A match that covers the whole subject yields two empty tokens.
-- Leading and trailing matches yield empty edge tokens; interior empty tokens
-  come from adjacent matches.
+- Zero-length matches split at every position: `a*` against `bbb` gives `""`,
+  `"b"`, `"b"`, `"b"`, `""` — five tokens.
+- A whole-subject match yields two empty tokens.
+- Leading and trailing matches yield empty edge tokens; adjacent matches yield
+  interior empty tokens.
 - Do not edit `h` while the tokens are in use (views are snapshots; see the
   [user guide](guide.md)).
 
@@ -445,8 +417,8 @@ sx_reg_free(re);
 | Template `repl` | a C string: no literal NUL; captures can inject NUL bytes into the result |
 
 - PCRE2 runs in **8-bit non-UTF mode**: `\d`, `\w`, `\s`, `\b` and friends
-  match ASCII only. Bytes that form a non-ASCII character (for example the
-  UTF-8 bytes `C2 A5`) never match `\d`.
+  match ASCII only; bytes forming a non-ASCII character (e.g. UTF-8 `C2 A5`)
+  never match `\d`.
 - In 8-bit non-UTF mode, `.` matches any byte except newline, including an
   embedded NUL: the pattern `A.B` matches the three bytes `A\0B`.
 - Replace is binary-safe in both directions: `a\0b` with the pattern `b` and
@@ -459,7 +431,7 @@ sx_reg_free(re);
 ## Error sentinels
 
 No documented call crashes on invalid input, a missing match or allocation
-failure; each family reports it with a fixed sentinel.
+failure; each family reports a fixed sentinel.
 
 | Call | No match | `NULL` argument / invalid input | Allocation failure |
 | --- | --- | --- | --- |
@@ -472,29 +444,24 @@ failure; each family reports it with a fixed sentinel.
 | `sx_reg_replace_first` | unchanged copy | `NULL` | `NULL` |
 | `sx_reg_split` | one-token array (the whole subject) | `NULL` | `NULL` |
 
-Notes:
-
-- For `sx_reg_match_all` and `sx_reg_split`, "no match" and allocation
-  failure both yield `NULL`; the array family cannot distinguish them.
-- For the replace family, "no match" is a normal success: you get an
-  unchanged copy of `h`.
-- Arrays are `malloc`'ed and released with `free()`; buffers returned by the
-  replace family are `sx_t *` and released with `sx_free()`.
+- For `sx_reg_match_all` and `sx_reg_split`, no match and allocation failure
+  both yield `NULL`; the array family cannot distinguish them.
+- For replace, no match is normal success: an unchanged copy of `h`.
+- Arrays are `malloc`'ed and freed with `free()`; replace results are
+  `sx_t *` freed with `sx_free()`.
 
 ## Thread safety
 
-- A compiled `sx_reg_t` is immutable after `sx_reg_compile`. It has no
-  mutable state and the wrapper keeps no global state, so one handle can be
-  used by several threads at the same time.
-- Each match/split call creates its own PCRE2 match-data block
-  (`pcre2_match_data_create_from_pattern`) and frees it before returning; the
-  replace calls delegate to `pcre2_substitute`, which also uses per-call
-  match data. Two threads never share match state.
+- A compiled `sx_reg_t` is immutable after `sx_reg_compile`, has no mutable
+  state, and the wrapper keeps no global state, so one handle can serve several
+  threads.
+- Each match/split call creates and frees its own PCRE2 match-data block;
+  replace delegates to `pcre2_substitute`, which also uses per-call match data.
+  No match state is shared.
 - A subject buffer is plain memory with no locking: concurrent readers are
-  fine, but any mutation requires external synchronization.
-- Views and arrays are snapshots into a subject. Do not edit the subject
-  while a thread is still reading views from it, and do not free a handle
-  while another thread is using it.
+  fine; mutation needs external synchronization.
+- Views and arrays are snapshots: do not edit a subject while another thread
+  reads its views, and do not free a handle while another thread uses it.
 
 ## Performance
 
@@ -507,19 +474,17 @@ Notes:
 | `sx_reg_split` | two passes over the scan | match data plus one exact-size array | array |
 | `sx_reg_replace*` | two substitute calls | internal PCRE2 match data, one temporary buffer, one `sx_t` | new buffer |
 
-Notes:
-
-- Compile once: pattern compilation costs far more than a single match, so
-  compiling inside a loop is the one avoidable performance mistake.
+- Compile once: compilation costs far more than a single match, so compiling
+  inside a loop is the one avoidable performance mistake.
 - `sx_reg_is_match` is the cheapest existence test; `sx_reg_match` adds only
   the returned view.
-- `sx_reg_match_all` and `sx_reg_split` scan twice (count, then fill) so the
-  result array is allocated exactly once and never grows by `realloc`.
-- The replace family probes the exact output length with a first
-  `pcre2_substitute` call, then fills a fitting buffer with a second call;
-  the buffer is copied once into the returned `sx_t`.
-- Every call allocates and frees match data; no match data is cached between
-  calls, and the wrapper does not enable PCRE2 JIT or any compile option.
+- `sx_reg_match_all` and `sx_reg_split` scan twice (count, then fill), so the
+  result array is allocated once at final size without `realloc` growth.
+- Replace probes the exact output length with a first `pcre2_substitute`
+  call, then fills a fitting buffer with a second; the buffer is copied once
+  into the returned `sx_t`.
+- Every call allocates and frees match data; nothing is cached, and the wrapper
+  enables neither PCRE2 JIT nor compile options.
 - The subject is never copied; only the replace family allocates a result
   buffer.
 
@@ -538,23 +503,21 @@ Notes:
 
 The wrapper fixes a small, deliberately plain configuration:
 
-- **8-bit, non-UTF**: the pattern and subject are bytes, character classes
-  are ASCII, and no UTF validation happens. In the default (no `DOTALL`)
-  mode `.` does not match newline.
-- **No option flags**: the wrapper passes no compile options and no match
-  options, and no match context. PCRE2 features that are expressed inside
-  the pattern, such as inline options, still work; case-insensitive
-  matching, multiline matching and similar behavior are requested with
-  PCRE2's in-pattern syntax.
-- **PCRE2 defaults govern**: leftmost-first alternation, greedy/lazy
-  quantifiers, anchors, backreferences and all other pattern semantics are
-  PCRE2's, not the wrapper's.
+- **8-bit, non-UTF**: pattern and subject are bytes, character classes are
+  ASCII, and no UTF validation happens. In the default (no `DOTALL`) mode `.`
+  does not match newline.
+- **No option flags**: no compile options, match options or match context are
+  passed. In-pattern features such as inline options still work, so
+  case-insensitive and multiline matching use PCRE2's own syntax.
+- **PCRE2 defaults govern**: alternation preference, greedy/lazy quantifiers,
+  anchors, backreferences and all other pattern semantics are PCRE2's, not the
+  wrapper's.
 - The wrapper does not expose PCRE2 error codes or compile error offsets.
 
-Pattern syntax and semantics are documented by the PCRE2 project at
-[pcre.org](https://www.pcre.org/); this library does not re-document them.
-The bundled PCRE2 version is 10.46; the dependency is BSD-3-Clause, with
-attribution in [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md).
+Pattern syntax and semantics are documented by PCRE2 at
+[pcre.org](https://www.pcre.org/); this library does not re-document them. The
+bundled PCRE2 version is 10.46; the dependency is BSD-3-Clause, attributed in
+[THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md).
 
 ---
 

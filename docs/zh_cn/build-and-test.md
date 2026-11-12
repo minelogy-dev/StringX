@@ -4,10 +4,9 @@
 
 # 构建、测试与打包
 
-String X 使用 [Forge](https://github.com/minelogy-dev/forge) 构建，这是一个
-构建脚本本身就是 C 程序的构建系统。本页介绍工具链要求、每个 `./make` 任务、
-测试框架与内存检查器（sanitizer）、安装、pkg-config 以及 Debian 打包。运行这些
-命令的 CI 流水线见[持续集成](ci.md)。
+String X 使用 [Forge](https://github.com/minelogy-dev/forge) 构建。本页介绍
+环境要求、`./make` 任务、测试框架与内存检查器（sanitizer）、安装、pkg-config
+与 Debian 打包。CI 见[持续集成](ci.md)。
 
 ## 环境要求
 
@@ -17,59 +16,30 @@ String X 使用 [Forge](https://github.com/minelogy-dev/forge) 构建，这是�
 | C23 编译器 | GCC 14+ 或 Clang 19+。 |
 | `libpcre2-dev` | PCRE2 10.46，8 位，正则层与每个测试都需要。运行时库需要 `libpcre2-8-0`。 |
 | `pkg-config` | 推荐使用者安装；CI 还用它链接已安装的库。 |
-| Forge | 构建工具；从源码引导安装（见下一节）。`./make` 是生成物，不纳入版本库。 |
+| Forge | [github.com/minelogy-dev/forge](https://github.com/minelogy-dev/forge)；`./make` 是生成物，不纳入版本库。 |
 | `tar` 与 `ar` | 只有 `./make gen_deb` 需要；`dpkg-deb` 仅用于检查产物。 |
 
-所有命令都在仓库根目录执行：`build.c` 与 `build.conf` 都相对于该目录读取。
+命令在仓库根目录执行；`build.c`、`build.conf` 相对该目录读取。
 
-## Forge 一分钟上手
+## 构建工具
 
-Forge 把 `build.c` 编译成本地可执行文件 `./make`。这个生成文件就是构建入口：
-下文每个任务都是 `build.c` 里的一个函数，以 `./make <任务>` 调用。它不是 GNU
-make。只要修改了 `build.c` 或 `build.conf`，就要重新运行 `forge .`。
-
-从源码引导 Forge，并把它的产物加入搜索路径：
+从 [Forge](https://github.com/minelogy-dev/forge) 仓库安装 Forge。运行一次
+`forge .` 生成 `./make` 后，日常命令为：
 
 ```sh
-git clone https://github.com/minelogy-dev/forge.git
-cd forge
-./bootstrap.sh --no-test
-export PATH="$PWD/build/output:$PATH"
-export CPATH="$PWD/build/output/include"
-cd /path/to/StringX
-forge .
-```
-
-CI 将 Forge 固定到提交
-`b6826ba762a1e9e337895e01ee604b943c682d23`。若要精确复现 CI，请把该提交
-检出到 `.ci-deps/forge`，并在不安装系统文件的情况下引导它：
-
-```sh
-git clone https://github.com/minelogy-dev/forge.git .ci-deps/forge
-git -C .ci-deps/forge checkout b6826ba762a1e9e337895e01ee604b943c682d23
-sh .ci-deps/forge/bootstrap.sh --no-test
-export PATH="$PWD/.ci-deps/forge/build/output:$PATH"
-export CPATH="$PWD/.ci-deps/forge/build/output/include"
-forge .
-```
-
-更换 Forge 版本时，两个工作流文件 `.github/workflows/ci.yml` 与
-`.github/workflows/codeql.yml` 中的固定提交必须保持一致。该固定点有意独立于
-Forge 的 `main` 分支，也不会被 Dependabot 更新。
-
-把 Forge 加入 `PATH` 后，日常命令与 README 一致：
-
-```sh
-forge .        # 把 build.c 编译成 ./make（改动 build.c 后需重跑）
+forge .        # 生成 ./make
 ./make         # 构建 -> build/output/libstringx.so（头文件随附于 build/output/include）
 ./make test    # 编译并运行 tests/ 下每个测试（ASan + UBSan）
 ```
+
+`./make` 是生成物且被 gitignore；修改 `build.c` 或 `build.conf` 后重跑
+`forge .`。
 
 ## 目标与命令
 
 | 命令 | 作用 |
 | --- | --- |
-| `forge .` | 按 `build.conf` 的设置把 `build.c` 编译成本地 `./make`。 |
+| `forge .` | 由 `build.c` 与 `build.conf` 生成 `./make`。 |
 | `./make` | 默认的 `build` 任务：把 `src/` 编译成 `build/output/libstringx.so`，并把 `include/*.h` 同步到 `build/output/include/`。 |
 | `./make check` | 用警告选项和 GCC 分析器编译库目标，但不做头文件同步。 |
 | `./make test` | 在 ASan + UBSan + LSan 下构建并运行 `tests/` 下的每个文件。 |
@@ -77,10 +47,10 @@ forge .        # 把 build.c 编译成 ./make（改动 build.c 后需重跑）
 | `./make install <prefix>` | 先构建，再安装库、头文件、声明文件和 `libstringx.pc`；前缀默认为 `/usr/local`。 |
 | `./make gen_deb` | 先构建，再暂存并生成 `build/deb/libstringx_<版本>_<架构>.deb`。 |
 
-`-v` 会让 `./make test` 与 `./make check` 打印完整的编译命令；不加时只显示
-`PASSED`/`FAILED` 行和最终汇总。`-j N` 并行执行一个目标的编译阶段。
+`-v` 让 `./make test` 与 `./make check` 打印完整编译命令；不加时只显示
+`PASSED`/`FAILED` 行与汇总。`-j N` 并行执行一个目标的编译阶段。
 
-产物位置如下：
+产物：
 
 | 路径 | 由谁生成 | 内容 |
 | --- | --- | --- |
@@ -91,37 +61,39 @@ forge .        # 把 build.c 编译成 ./make（改动 build.c 后需重跑）
 | `build/opt/` | `./make test` | 测试目标文件及其 `.d`/`.meta` 文件 |
 | `build/deb/` | `./make gen_deb` | Debian 暂存目录与最终 `.deb` |
 
-`./make test` 不需要先运行 `./make`：每个测试都直接编译库源码。
+`./make test` 无需先运行 `./make`：每个测试直接编译库源码。
 
 ## build.conf
 
-`build.conf` 在 Forge 生成 `./make` 时读取；每个 `KEY=VALUE` 行都会变成构建脚本
-的 `-DCONF_KEY=VALUE` 宏。以 `#` 开头的行是注释。修改后需要重新运行 `forge .`。
+`build.conf` 在生成 `./make` 时读取；每个 `KEY=VALUE` 行变成
+`-DCONF_KEY=VALUE` 宏，`#` 开头为注释。修改后重跑 `forge .`。
 
 | 键 | 取值 | 作用 |
 | --- | --- | --- |
 | `compiler` | `GCC` 或 `CLANG` | 工具链后端。`build.c` 把 `CONF_compiler` 传给 `set_toolchain`，因此它同时决定库与测试使用的编译器。 |
-| `compiler_path` | 绝对路径，例如 `/usr/bin/gcc` | Forge 编译生成的 `./make` 时使用的编译器二进制文件。 |
+| `compiler_path` | 绝对路径，例如 `/usr/bin/gcc` | 生成 `./make` 时使用的编译器二进制文件。 |
 | `version` | `v0.5` | 项目版本的唯一来源。`build.c` 把它字符串化为 `SX_VERSION`；安装与打包会去掉开头的 `v`。 |
 | `sanitize` | `1` | CI 中由 `.github/scripts/configure.sh` 追加。内存检查器选项本身由每个测试在头部 DSL 中声明。 |
 
 ## 运行测试
 
 `./make test` 递归扫描 `tests/`，把每个 `tests/*.c` 编译成 `test/<名称>` 并
-运行。测试成功时打印 `PASSED: <文件>`，第一个断言失败时打印
-`FAILED: <文件>:<行号>: <表达式>`。任务结束时输出类似下面的汇总：
+运行。成功打印 `PASSED: <文件>`，首个断言失败打印
+`FAILED: <文件>:<行号>: <表达式>`。汇总形如：
 
 ```text
-forge: 20 tests, 20 passed, 0 failed
+forge: 24 tests, 24 passed, 0 failed
 ```
 
-只要有测试编译或运行失败，任务就以非零状态退出。
+测试编译或运行失败时，任务以非零状态退出。
 
-测试不链接 `libstringx.so`：每个测试直接编译库源码，并在自己的头部声明选项，
-包括 `-fsanitize=address,undefined` 与 `-fno-omit-frame-pointer`。LeakSanitizer
-与 ASan 一起运行，因此测试若忘记释放缓冲区或返回的数组就会失败。
+测试不链接 `libstringx.so`：各自直接编译库源码，并在头部声明选项，包括
+`-fsanitize=address,undefined` 与 `-fno-omit-frame-pointer`。LeakSanitizer 与
+ASan 一起运行，忘记释放缓冲区或数组的测试会失败。少数测试在普通配置与强制
+配置的兄弟目标间共享本地用例头（`find_differential.h`、
+`write_overflow_cases.h`）；每个 `.c` 仍是独立目标。
 
-请设置与 CI 相同的内存检查器选项：
+设置 CI 的内存检查器选项：
 
 ```sh
 export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
@@ -129,7 +101,7 @@ export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
 ./make test -j 2
 ```
 
-单独重跑某个已构建的测试：
+单独重跑已构建的测试：
 
 ```sh
 ./test/reserve_stress
@@ -137,36 +109,35 @@ export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
 
 ### 精确预留压力测试
 
-`tests/reserve_stress.c` 是 `-DSX_FORCE_EXACT_RESERVE` 的专用配置，该宏在其
-头部以 `// Option -DSX_FORCE_EXACT_RESERVE` 声明。这个开关把
-`src/sx_raw.c` 内部的预留辅助函数从几何增长改为精确分配
-（`cap == need + 1`），于是分配正好在结尾符处结束，任何越过 `len` 的访问都会
-立刻命中 ASan 的红区——多余的容量无法掩盖差一错误或过期的长度。测试用确定性
-的 LCG 驱动三个活动缓冲区，并在每次修改后断言完整内容；其模型不超过 512 字节。
-其余所有测试都在默认的几何增长模式下构建。
+`tests/reserve_stress.c` 与 `tests/write_overflow_exact.c` 使用
+`-DSX_FORCE_EXACT_RESERVE` 构建，头部以
+`// Option -DSX_FORCE_EXACT_RESERVE` 声明。该开关把 `src/sx_raw.c` 的预留助手
+从几何增长改为精确分配（`cap == need + 1`）：分配正好止于结尾符，越过 `len`
+的访问立刻命中 ASan 红区，多余的容量无法掩盖差一错误或过期长度。压力测试用
+确定性 LCG 驱动三个活动缓冲区，每次修改都断言完整内容（模型不超过 512 字节）；
+写入溢出测试在精确分配下重跑其 `SIZE_MAX` 范围用例。其余测试使用几何增长。
 
 ## 测试文件与头部 DSL
 
-每个测试都是自包含程序。文件开头连续若干行 `//` 构成 Forge 测试运行器读取的
-头部 DSL；遇到第一行非 `//` 的内容时头部结束。
+每个测试都是自包含程序。开头连续的 `//` 行是测试运行器读取的头部
+DSL，第一行非 `//` 内容结束。
 
 | 条目 | 作用 |
 | --- | --- |
-| `// Include <目录>` | 添加 `-I<目录>`。每个测试都包含 `include`、`src` 和 `/usr/lib/forge/include` —— 最后一项是 `<build.h>` 所需的 Forge 头文件；若通过 `CPATH` 提供，这一项也无害。 |
+| `// Include <目录>` | 添加 `-I<目录>`。每个测试都包含 `include`、`src` 和 `/usr/lib/forge/include`；最后一项在 `CPATH` 未提供时用于找到 `<build.h>`。 |
 | `// Source <文件>` | 把一个源文件加入测试可执行文件。测试都会加入 `src/sx_raw.c`、`src/sx_core.c` 与 `src/sx_adv.c`。 |
 | `// Link <库>` | 添加 `-l<库>`。只有 `tests/reg.c` 加入 `pcre2-8`；其他测试不使用正则层。 |
 | `// Library <目录>` | 添加 `-L<目录>`。测试加入 `/usr/local/lib`。 |
 | `// Option <选项>` | 添加编译器、链接器与汇编器选项。测试使用 `-std=c23 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer`，以及诸如 `-DSX_FORCE_EXACT_RESERVE` 的测试专用宏。 |
 
-不带关键字的行会延续当前作用域（初始为 `Source`）；测试为了清晰都写出了每个
+不带关键字的行延续当前作用域（初始为 `Source`）；测试为清晰起见写出了每个
 关键字。
 
-由于每个测试都会编译 `src/sx_adv.c`，`build.c` 通过其保留的 `LANGUAGE`
-覆盖项为每个测试目标附加 `pcre2-8`；`tests/reg.c` 还显式声明了
-`// Link pcre2-8`。
+每个测试都编译 `src/sx_adv.c`，因此 `build.c` 通过保留的 `LANGUAGE` 覆盖项
+为测试目标附加 `pcre2-8`；`tests/reg.c` 还声明了 `// Link pcre2-8`。
 
-程序本身包含被测头文件（`"sx.h"`，仅测核心层时用 `"sx_core.h"`）以及提供两个
-测试宏的 `<build.h>`：
+程序包含被测头文件（`"sx.h"`，仅核心层用 `"sx_core.h"`）与提供两个测试宏的
+`<build.h>`：
 
 | 宏 | 作用 |
 | --- | --- |
@@ -176,12 +147,11 @@ export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
 ### 添加测试
 
 1. 创建 `tests/<名称>.c` —— 每个文件只覆盖一个行为领域。
-2. 从现有测试复制头部 DSL 块，并按所需依赖调整 `Source`、`Link` 与 `Option`。
-3. 在文件顶部写明行为边界：测试锁定了什么（`In scope (contract)`），以及
-   有意不覆盖什么（`Out of contract (not exercised)`）。
-4. 包含被测头文件，用 `TEST` 断言，释放每个缓冲区与返回的数组，最后以
-   `PASS()` 结束。
-5. 运行 `./make test`。新文件会被自动发现。
+2. 从现有测试复制头部 DSL 块，按需调整 `Source`、`Link` 与 `Option`。
+3. 写明行为边界：锁定什么（`In scope (contract)`），不覆盖什么
+   （`Out of contract (not exercised)`）。
+4. 包含被测头文件，用 `TEST` 断言，释放每个缓冲区与数组，最后调用 `PASS()`。
+5. 运行 `./make test`；新文件会被自动发现。
 
 ```c
 // Include include
@@ -224,7 +194,7 @@ int main(void) {
 
 ## 安装
 
-`./make install` 会先构建（包括头文件同步），然后复制：
+`./make install` 先构建（含头文件同步），再复制：
 
 | 目标位置 | 内容 |
 | --- | --- |
@@ -237,14 +207,14 @@ int main(void) {
 | `<prefix>/share/doc/libstringx/THIRD_PARTY_NOTICES.md` | PCRE2 归属与许可全文 |
 | `<prefix>/share/doc/libstringx/copyright` | `LICENSE` 的副本，Debian 惯用文件名 |
 
-默认前缀为 `/usr/local`。可以传入一个无需 root 即可写入的前缀，例如：
+默认前缀 `/usr/local`；可传入无需 root 即可写入的前缀，例如：
 
 ```sh
 ./make install "$HOME/.local"
 ```
 
-pkg-config 文件在安装时生成。它的 `prefix=` 就是安装前缀，`Version` 是
-`build.conf` 版本去掉开头的 `v`（即 `0.5`）。
+pkg-config 文件在安装时生成：`prefix=` 为安装前缀，`Version` 为 `build.conf`
+版本去掉开头 `v`（即 `0.5`）。
 
 ## 使用已安装的库
 
@@ -261,7 +231,7 @@ cc -std=c23 hello.c $(pkg-config --cflags --libs libstringx) -o hello
 cc -std=c23 hello.c -I<prefix>/include -L<prefix>/lib -lstringx -o hello
 ```
 
-对于非标准前缀，让 pkg-config 与运行期加载器指向它，或者写入 rpath：
+非标准前缀时，让 pkg-config 与运行期加载器指向它，或写入 rpath：
 
 ```sh
 export PKG_CONFIG_PATH="<prefix>/lib/pkgconfig"
@@ -269,7 +239,7 @@ cc -std=c23 hello.c $(pkg-config --cflags --libs libstringx) \
   -Wl,-rpath,"<prefix>/lib" -o hello
 ```
 
-库自身已链接 `pcre2-8`，使用者无需 `-lpcre2-8`。完整程序如下：
+库自身已链接 `pcre2-8`，使用者无需 `-lpcre2-8`。完整程序：
 
 ```c
 #include <sx.h>
@@ -288,7 +258,7 @@ int main(void) {
 
 ## Debian 包
 
-`./make gen_deb` 会先构建，然后用 `tar` 与 `ar` 暂存并打包出 Debian `.deb`
+`./make gen_deb` 先构建，再用 `tar` 与 `ar` 暂存并打包 Debian `.deb`
 （不依赖 `dpkg-deb`）：
 
 | 路径 | 内容 |
@@ -298,12 +268,12 @@ int main(void) {
 | `build/deb/debian-binary`、`control.tar.gz`、`data.tar.gz` | 包的各组成部分 |
 | `build/deb/libstringx_<版本>_<架构>.deb` | 最终包 |
 
-版本取自 `build.conf` 并去掉开头的 `v`；架构取自 `uname -m`
-（`x86_64` → `amd64`，`aarch64` → `arm64`，其他值保持不变）。包装到 `/usr`
-下，并声明 `Depends: libc6, libpcre2-8-0`。包内的 `libstringx.pc` 以 `/usr`
-作为前缀，暂存路径不会写进去。
+版本取自 `build.conf` 去掉开头 `v`；架构取自 `uname -m`（`x86_64` →
+`amd64`，`aarch64` → `arm64`，其他值不变）。包装到 `/usr` 下，声明
+`Depends: libc6, libpcre2-8-0`，包内 `libstringx.pc` 以 `/usr` 为前缀，暂存
+路径不会写入。
 
-检查并安装：
+检查安装：
 
 ```sh
 dpkg-deb --info build/deb/libstringx_*.deb
@@ -315,23 +285,22 @@ sudo apt install ./build/deb/libstringx_*.deb
 
 | 现象 | 原因与处理 |
 | --- | --- |
-| `forge: command not found` | Forge 不在 `PATH` 中。引导它并导出 `PATH=<forge>/build/output`。 |
-| `build.h: No such file or directory` | Forge 的构建脚本头文件不可见。像 CI 那样导出 `CPATH=<forge>/build/output/include`，或系统级安装 Forge。`<build.h>` 只存在于 Forge 构建环境中。 |
+| `forge: command not found` | Forge 不在 `PATH` 中；按 Forge 仓库的安装说明配置。 |
 | `pcre2.h: No such file or directory` 或 `cannot find -lpcre2-8` | 安装 `libpcre2-dev`（Ubuntu：`sudo apt-get install libpcre2-dev`）。 |
 | 克隆后出现 `./make: No such file or directory` | `./make` 是生成物且被 gitignore。先运行 `forge .`。 |
 | 修改 `build.c` 或 `build.conf` 后没有生效 | `./make` 由旧脚本生成。重新运行 `forge .`。 |
-| Clang 下测试链接因 `-flto` 失败 | 固定的 Forge 在并行 Clang 链接时会输出仅适用于 GCC 的 `-flto=N`，因此 `build.c` 中的测试目标特意关闭 LTO；生产目标保留 LTO。用 Clang 运行测试套件时请保持测试关闭 LTO。 |
+| Clang 下测试链接因 `-flto` 失败 | 固定版本的构建工具在并行 Clang 链接时会输出仅适用于 GCC 的 `-flto=N`，因此 `build.c` 中的测试目标关闭 LTO；生产目标保留 LTO。 |
 | `install` 报告权限错误 | 前缀不可写。传入你有权限的前缀，例如 `./make install "$HOME/.local"`。 |
 | 测试因泄漏报告失败 | 有缓冲区或数组未释放。每个 `sx_t` 都要用 `sx_free` 释放，每个返回的数组都要用 `free` 释放。 |
 | 使用者程序找不到 `libstringx.so` | 把 `LD_LIBRARY_PATH` 设为 `<prefix>/lib`，用 `-Wl,-rpath,<prefix>/lib` 链接，或安装到标准前缀。 |
 
-不要在库源码或应用程序中包含 `<build.h>`：它是 Forge 的构建脚本 DSL 头文件，
-不属于 String X API。应用程序只包含 `<sx.h>`。
+不要在库源码或程序中包含 `<build.h>`：它是构建脚本的 DSL 头文件，非
+String X API。程序只包含 `<sx.h>`。
 
 ## 持续集成
 
-在每次推送与拉取请求上运行这些命令的工作流——构建矩阵、分析器、质量检查、
-CodeQL 与合并保护——见[持续集成](ci.md)。
+运行这些命令的工作流（推送与拉取请求）——构建矩阵、分析器、质量检查、CodeQL
+与合并保护——见[持续集成](ci.md)。
 
 ---
 

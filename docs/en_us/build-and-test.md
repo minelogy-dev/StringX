@@ -4,11 +4,10 @@ English · [中文](../zh_cn/build-and-test.md)
 
 # Build, test & package
 
-String X builds with [Forge](https://github.com/minelogy-dev/forge), a build
-system whose build script is a C program. This page covers the toolchain
-requirements, every `./make` task, the test harness and sanitizers,
-installation, pkg-config and Debian packaging. For the CI pipelines that run
-these commands, see [Continuous integration](ci.md).
+String X builds with [Forge](https://github.com/minelogy-dev/forge). This page
+covers prerequisites, `./make` tasks, the test harness and sanitizers,
+installation, pkg-config and Debian packaging. CI is described in
+[Continuous integration](ci.md).
 
 ## Prerequisites
 
@@ -18,62 +17,31 @@ these commands, see [Continuous integration](ci.md).
 | C23 compiler | GCC 14+ or Clang 19+. |
 | `libpcre2-dev` | PCRE2 10.46, 8-bit, for the regex layer and every test. At run time the library needs `libpcre2-8-0`. |
 | `pkg-config` | Recommended for consumers; CI also uses it to link against the installed library. |
-| Forge | The build tool; bootstrap it from source (next section). `./make` is generated, not checked in. |
+| Forge | [github.com/minelogy-dev/forge](https://github.com/minelogy-dev/forge); `./make` is generated, not checked in. |
 | `tar` and `ar` | Only for `./make gen_deb`; `dpkg-deb` is only needed to inspect the result. |
 
-Run every command from the repository root: `build.c` and `build.conf` are read
+Run commands from the repository root; `build.c` and `build.conf` are read
 relative to it.
 
-## Forge in one minute
+## Build tool
 
-Forge compiles `build.c` into a local executable, `./make`. That generated file
-is the build entry point: each task below is a function in `build.c`, invoked as
-`./make <task>`. It is not GNU make. Re-run `forge .` whenever `build.c` or
-`build.conf` changes.
-
-Bootstrap Forge from source and put its artifacts on the search paths:
+Install [Forge](https://github.com/minelogy-dev/forge) from its repository. Once
+`forge .` has generated `./make`, the everyday commands are:
 
 ```sh
-git clone https://github.com/minelogy-dev/forge.git
-cd forge
-./bootstrap.sh --no-test
-export PATH="$PWD/build/output:$PATH"
-export CPATH="$PWD/build/output/include"
-cd /path/to/StringX
-forge .
-```
-
-CI pins Forge to commit
-`b6826ba762a1e9e337895e01ee604b943c682d23`. To reproduce CI exactly, check out
-that commit into `.ci-deps/forge` and bootstrap it without installing system
-files:
-
-```sh
-git clone https://github.com/minelogy-dev/forge.git .ci-deps/forge
-git -C .ci-deps/forge checkout b6826ba762a1e9e337895e01ee604b943c682d23
-sh .ci-deps/forge/bootstrap.sh --no-test
-export PATH="$PWD/.ci-deps/forge/build/output:$PATH"
-export CPATH="$PWD/.ci-deps/forge/build/output/include"
-forge .
-```
-
-Keep the pin identical in `.github/workflows/ci.yml` and
-`.github/workflows/codeql.yml` when changing Forge. It is deliberately
-independent of Forge's `main` branch and is not updated by Dependabot.
-
-With Forge on `PATH`, the everyday commands are the ones from the README:
-
-```sh
-forge .        # compile build.c into ./make (re-run whenever build.c changes)
+forge .        # generate ./make
 ./make         # build -> build/output/libstringx.so (+ headers at build/output/include)
 ./make test    # build and run every test under tests/ (ASan + UBSan)
 ```
+
+`./make` is generated and gitignored; re-run `forge .` after editing `build.c`
+or `build.conf`.
 
 ## Targets and commands
 
 | Command | What it does |
 | --- | --- |
-| `forge .` | Compile `build.c` with the `build.conf` settings into a local `./make`. |
+| `forge .` | Generate `./make` from `build.c` and `build.conf`. |
 | `./make` | Default `build` task: compile `src/` into `build/output/libstringx.so` and sync `include/*.h` to `build/output/include/`. |
 | `./make check` | Compile the library target with the warning flags and the GCC analyzer, without the header sync. |
 | `./make test` | Build and run every file in `tests/` under ASan + UBSan + LSan. |
@@ -81,11 +49,11 @@ forge .        # compile build.c into ./make (re-run whenever build.c changes)
 | `./make install <prefix>` | Build, then install the library, headers, notices and `libstringx.pc`; the prefix defaults to `/usr/local`. |
 | `./make gen_deb` | Build, then stage and produce `build/deb/libstringx_<version>_<arch>.deb`. |
 
-`-v` makes `./make test` and `./make check` print the full compile commands;
-without it only `PASSED`/`FAILED` lines and the final summary are shown. `-j N`
+`-v` prints the full compile commands for `./make test` and `./make check`;
+without it only `PASSED`/`FAILED` lines and the summary appear. `-j N`
 parallelizes one target's compile pass.
 
-The artifacts land here:
+Artifacts:
 
 | Path | Produced by | Contents |
 | --- | --- | --- |
@@ -96,41 +64,43 @@ The artifacts land here:
 | `build/opt/` | `./make test` | test object files with their `.d`/`.meta` files |
 | `build/deb/` | `./make gen_deb` | the Debian staging tree and the final `.deb` |
 
-`./make test` does not need `./make` first: every test compiles the library
-sources directly.
+`./make test` needs no prior `./make`: every test compiles the library sources
+directly.
 
 ## build.conf
 
-`build.conf` is read when Forge generates `./make`; each `KEY=VALUE` line
-becomes a `-DCONF_KEY=VALUE` macro for the build script. Lines starting with
-`#` are comments. Re-run `forge .` after editing it.
+`build.conf` is read when `./make` is generated; each `KEY=VALUE` line becomes a
+`-DCONF_KEY=VALUE` macro, and `#` starts a comment. Re-run `forge .` after
+editing it.
 
 | Key | Value | Effect |
 | --- | --- | --- |
 | `compiler` | `GCC` or `CLANG` | Toolchain backend. `build.c` forwards `CONF_compiler` to `set_toolchain`, so this selects the compiler for the library and the tests. |
-| `compiler_path` | an absolute path, e.g. `/usr/bin/gcc` | The compiler binary Forge uses to build the generated `./make`. |
+| `compiler_path` | an absolute path, e.g. `/usr/bin/gcc` | Compiler binary used when generating `./make`. |
 | `version` | `v0.5` | The single source of truth for the project version. `build.c` stringifies it into `SX_VERSION`; install and packaging strip the leading `v`. |
 | `sanitize` | `1` | Added by `.github/scripts/configure.sh` in CI. The sanitizer flags themselves are declared per test in the header DSL. |
 
 ## Running the tests
 
 `./make test` scans `tests/` recursively, compiles each `tests/*.c` into
-`test/<name>` and runs it. A test prints `PASSED: <file>` on success, or
-`FAILED: <file>:<line>: <expression>` on the first failing assertion. The task
-ends with a summary such as:
+`test/<name>` and runs it. Success prints `PASSED: <file>`; the first failed
+assertion prints `FAILED: <file>:<line>: <expression>`. The summary looks
+like:
 
 ```text
-forge: 20 tests, 20 passed, 0 failed
+forge: 24 tests, 24 passed, 0 failed
 ```
 
-The task exits non-zero if any test fails to compile or to run.
+The task exits non-zero if a test fails to compile or run.
 
-Tests do not link `libstringx.so`: each one compiles the library sources
-directly and declares its own flags, including `-fsanitize=address,undefined`
-and `-fno-omit-frame-pointer`. LeakSanitizer runs together with ASan, so a test
-that forgets to free a buffer or a returned array fails.
+Tests do not link `libstringx.so`: each compiles the library sources directly
+and declares its own flags, including `-fsanitize=address,undefined` and
+`-fno-omit-frame-pointer`. LeakSanitizer runs with ASan, so an unfreed buffer
+or array fails the test. A few tests share a local case header
+(`find_differential.h`, `write_overflow_cases.h`) between the normal and a
+forced-configuration sibling; each `.c` remains its own target.
 
-Set the same sanitizer options CI uses:
+Set CI's sanitizer options:
 
 ```sh
 export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
@@ -138,7 +108,7 @@ export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
 ./make test -j 2
 ```
 
-To rerun one built test directly:
+Rerun one built test directly:
 
 ```sh
 ./test/reserve_stress
@@ -146,39 +116,39 @@ To rerun one built test directly:
 
 ### Exact-reserve stress test
 
-`tests/reserve_stress.c` is the dedicated configuration for
-`-DSX_FORCE_EXACT_RESERVE`, declared as
-`// Option -DSX_FORCE_EXACT_RESERVE` in its header. The switch remaps the
-internal reserve helper in `src/sx_raw.c` from geometric growth to exact sizing
-(`cap == need + 1`), so an allocation ends exactly at the terminator and any
-access past `len` hits an ASan redzone immediately — slack capacity cannot hide
-an off-by-one or a stale length. The test drives a deterministic LCG over three
-live buffers and asserts full content on every edit; its models stay within
-512 bytes. Every other test builds in the default geometric-growth mode.
+`tests/reserve_stress.c` and `tests/write_overflow_exact.c` run with
+`-DSX_FORCE_EXACT_RESERVE`, declared as `// Option -DSX_FORCE_EXACT_RESERVE` in
+their headers. The switch remaps the internal reserve helper in `src/sx_raw.c`
+from geometric growth to exact sizing (`cap == need + 1`): the allocation ends
+exactly at the terminator, so any access past `len` hits an ASan redzone and
+slack capacity cannot hide an off-by-one or a stale length. The stress test
+drives three live buffers with a deterministic LCG and asserts full content on
+every edit (models stay within 512 bytes); the write-overflow test repeats its
+`SIZE_MAX` range cases under exact allocations. Every other test builds with
+geometric growth.
 
 ## Test files and the header DSL
 
-Each test is a self-contained program. Its leading consecutive `//` lines form a
-header DSL that Forge's test runner reads; the first non-`//` line ends the
-header.
+Each test is a self-contained program. Its leading consecutive `//` lines are a
+header DSL read by the test runner; the first non-`//` line ends it.
 
 | Entry | Effect |
 | --- | --- |
-| `// Include <dir>` | Add `-I<dir>`. Every test includes `include`, `src` and `/usr/lib/forge/include` — Forge's headers for `<build.h>`; the last one is harmless when they are supplied through `CPATH` instead. |
+| `// Include <dir>` | Add `-I<dir>`. Every test includes `include`, `src` and `/usr/lib/forge/include`; the last one supplies `<build.h>` when it is not on `CPATH`. |
 | `// Source <file>` | Add a source file to the test executable. Tests add `src/sx_raw.c`, `src/sx_core.c` and `src/sx_adv.c`. |
 | `// Link <lib>` | Add `-l<lib>`. Only `tests/reg.c` adds `pcre2-8`; the other tests do not use the regex layer. |
 | `// Library <dir>` | Add `-L<dir>`. Tests add `/usr/local/lib`. |
 | `// Option <flag>` | Add a compiler, linker and assembler option. Tests use `-std=c23 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer`, plus test-specific defines such as `-DSX_FORCE_EXACT_RESERVE`. |
 
-A line without a keyword continues the current scope, which starts as `Source`;
-the tests spell out every keyword for clarity.
+A line without a keyword continues the current scope (initially `Source`); the
+tests spell out every keyword.
 
-Because every test compiles `src/sx_adv.c`, `build.c` attaches `pcre2-8` to
-every test target through its reserved `LANGUAGE` override; `tests/reg.c` also
-declares `// Link pcre2-8` explicitly.
+Every test compiles `src/sx_adv.c`, so `build.c` attaches `pcre2-8` to every
+test target through its reserved `LANGUAGE` override; `tests/reg.c` also
+declares `// Link pcre2-8`.
 
-The program itself includes the header under test (`"sx.h"`, or `"sx_core.h"`
-for core-only tests) and `<build.h>` for two test macros:
+The program includes the header under test (`"sx.h"`, or `"sx_core.h"` for
+core-only tests) and `<build.h>` for two macros:
 
 | Macro | Purpose |
 | --- | --- |
@@ -188,14 +158,14 @@ for core-only tests) and `<build.h>` for two test macros:
 ### Adding a test
 
 1. Create `tests/<name>.c` — one behavior area per file.
-2. Copy the header DSL block from an existing test and adjust `Source`,
-   `Link` and `Option` for the dependencies you need.
-3. Document the behavior boundaries at the top: what the test locks in
-   (`In scope (contract)`) and what it deliberately does not exercise
+2. Copy a header DSL block from an existing test; adjust `Source`, `Link` and
+   `Option` as needed.
+3. Document the behavior boundaries: what the test locks in
+   (`In scope (contract)`) and what it does not exercise
    (`Out of contract (not exercised)`).
 4. Include the header under test, assert with `TEST`, free every buffer and
    returned array, then finish with `PASS()`.
-5. Run `./make test`. The new file is discovered automatically.
+5. Run `./make test`; the new file is discovered automatically.
 
 ```c
 // Include include
@@ -238,7 +208,7 @@ int main(void) {
 
 ## Installing
 
-`./make install` builds first (including the header sync), then copies:
+`./make install` builds first (with the header sync), then copies:
 
 | Destination | Contents |
 | --- | --- |
@@ -251,16 +221,15 @@ int main(void) {
 | `<prefix>/share/doc/libstringx/THIRD_PARTY_NOTICES.md` | PCRE2 attribution and license |
 | `<prefix>/share/doc/libstringx/copyright` | a copy of `LICENSE` under Debian's conventional name |
 
-The default prefix is `/usr/local`. Pass a prefix you can write to without
-root, for example:
+The default prefix is `/usr/local`; pass a writable prefix, for example:
 
 ```sh
 ./make install "$HOME/.local"
 ```
 
-The pkg-config file is generated at install time. Its `prefix=` is the install
-prefix and its `Version` is the `build.conf` version without the leading `v`
-(so `0.5`).
+The pkg-config file is generated at install time: `prefix=` is the install
+prefix, and `Version` is the `build.conf` version without the leading `v`
+(`0.5`).
 
 ## Consuming the installed library
 
@@ -286,8 +255,8 @@ cc -std=c23 hello.c $(pkg-config --cflags --libs libstringx) \
   -Wl,-rpath,"<prefix>/lib" -o hello
 ```
 
-The library links `pcre2-8` itself, so consumers do not need `-lpcre2-8`. A
-complete program:
+The library links `pcre2-8`, so consumers need no `-lpcre2-8`. A complete
+program:
 
 ```c
 #include <sx.h>
@@ -306,8 +275,8 @@ int main(void) {
 
 ## Debian package
 
-`./make gen_deb` builds first, then stages and packages a Debian `.deb` with
-`tar` and `ar` (no `dpkg-deb` dependency):
+`./make gen_deb` builds first, then stages a Debian `.deb` with `tar` and `ar`
+(no `dpkg-deb` dependency):
 
 | Path | Contents |
 | --- | --- |
@@ -316,13 +285,12 @@ int main(void) {
 | `build/deb/debian-binary`, `control.tar.gz`, `data.tar.gz` | the package parts |
 | `build/deb/libstringx_<version>_<arch>.deb` | the finished package |
 
-The version comes from `build.conf` with the leading `v` stripped; the
-architecture comes from `uname -m` (`x86_64` → `amd64`, `aarch64` → `arm64`,
-anything else unchanged). The package installs under `/usr` and declares
-`Depends: libc6, libpcre2-8-0`. The `libstringx.pc` inside the package bakes
-`/usr` as its prefix; the staging path never leaks into it.
+Version comes from `build.conf` without the leading `v`; architecture from
+`uname -m` (`x86_64` → `amd64`, `aarch64` → `arm64`, otherwise unchanged). The
+package installs under `/usr`, declares `Depends: libc6, libpcre2-8-0`, and
+bakes `/usr` into its `libstringx.pc` — the staging path never leaks in.
 
-Inspect and install it:
+Inspect and install:
 
 ```sh
 dpkg-deb --info build/deb/libstringx_*.deb
@@ -334,25 +302,24 @@ sudo apt install ./build/deb/libstringx_*.deb
 
 | Symptom | Cause and fix |
 | --- | --- |
-| `forge: command not found` | Forge is not on `PATH`. Bootstrap it and export `PATH=<forge>/build/output`. |
-| `build.h: No such file or directory` | Forge's build-script headers are not visible. Export `CPATH=<forge>/build/output/include` as CI does, or install Forge system-wide. `<build.h>` exists only inside Forge builds. |
+| `forge: command not found` | Forge is not on `PATH`; follow its repository's installation instructions. |
 | `pcre2.h: No such file or directory` or `cannot find -lpcre2-8` | Install `libpcre2-dev` (Ubuntu: `sudo apt-get install libpcre2-dev`). |
 | `./make: No such file or directory` after cloning | `./make` is generated and gitignored. Run `forge .` first. |
 | Changes to `build.c` or `build.conf` have no effect | `./make` was generated from the old script. Re-run `forge .`. |
-| Test link fails with Clang and `-flto` | The pinned Forge emits GCC-only `-flto=N` for parallel Clang links, so the test targets in `build.c` deliberately disable LTO; production targets keep it. Keep test LTO disabled when running the suite with Clang. |
+| Test link fails with Clang and `-flto` | The pinned build tool emits GCC-only `-flto=N` for parallel Clang links, so test targets in `build.c` disable LTO; production targets keep it. |
 | `install` reports a permission error | The prefix is not writable. Pass one you own, e.g. `./make install "$HOME/.local"`. |
 | A test fails with a leak report | A buffer or an array is not freed. Free every `sx_t` with `sx_free` and every returned array with `free`. |
 | A consumer binary cannot find `libstringx.so` | Set `LD_LIBRARY_PATH` to `<prefix>/lib`, link with `-Wl,-rpath,<prefix>/lib`, or install to a standard prefix. |
 
-Do not include `<build.h>` in the library sources or in applications: it is
-Forge's build-script DSL header, not part of the String X API. Applications
-include `<sx.h>` only.
+Do not include `<build.h>` in library sources or applications: it is the
+build-script DSL header, not part of the String X API. Applications include
+`<sx.h>` only.
 
 ## Continuous integration
 
-The workflows that run these commands on every push and pull request — the
-build matrix, the analyzer, the quality checks, CodeQL and merge protection —
-are described in [Continuous integration](ci.md).
+The workflows that run these commands on every push and pull request — build
+matrix, analyzer, quality checks, CodeQL and merge protection — are in
+[Continuous integration](ci.md).
 
 ---
 

@@ -38,8 +38,8 @@ backed by PCRE2.
   split, with the full contract of each call.
 - [Design & internals](design.md) — data layout, growth policy, search
   algorithms, regex wrapper internals, portability limits, testing strategy.
-- [Build, test & package](build-and-test.md) — Forge, `./make` targets, the
-  test harness, sanitizers, installation and Debian packaging.
+- [Build, test & package](build-and-test.md) — `./make` targets, the test
+  harness, sanitizers, installation and Debian packaging.
 - [Contributing](contributing.md) — workflow, contract-first documentation,
   code style, tests, licensing.
 - [Continuous integration](ci.md) — workflows, required checks, CodeQL,

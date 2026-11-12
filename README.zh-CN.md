@@ -35,8 +35,7 @@
 ## 依赖
 
 - C23 编译器（GCC / Clang），Linux
-- 构建需要 `forge` 构建工具（https://github.com/minelogy-dev/forge —— 自定义
-  构建系统：它会将 `build.c` 编译成本地 `./make` 入口）
+- 从源码构建需要 [Forge](https://github.com/minelogy-dev/forge)
 - `libpcre2-dev`（PCRE2 8 位）——正则层的依赖；共享库自身已链接
   `pcre2-8`，使用者只需 `-lstringx`
 - 推荐使用者安装 `pkg-config`（或 pkgconf）—— 安装包自带 `libstringx.pc`
@@ -44,7 +43,7 @@
 ## 构建
 
 ```sh
-forge .        # 把 build.c 编译成 ./make（改动 build.c 后需重跑）
+forge .        # 生成 ./make
 ./make         # 构建 -> build/output/libstringx.so（头文件随附于 build/output/include）
 ./make test    # 编译并运行 tests/ 下每个测试（ASan + UBSan）
 ```
@@ -53,21 +52,26 @@ forge .        # 把 build.c 编译成 ./make（改动 build.c 后需重跑）
 
 ## 快速上手
 
+每次修改都返回传入的句柄，因此整条链是一个表达式：`sx_append` 消费传入的
+`sx_t *`，最后只需一次 `sx_free`。
+
 ```c
 #include <sx.h>
 #include <stdio.h>
 
 int main(void) {
-  sx_t *msg = sx_new_from_cstr("hello, world");
-  size_t at = sx_find_cstr(msg, ", ");
-  sx_t *hi = sx_substr(msg, 0, at);
-  fwrite(sx_buf_mut(hi), 1, (size_t)sx_len(hi), stdout);
-  putchar('\n');                        /* hello */
-  sx_free(hi);
-  sx_free(msg);
+  /* One expression: every call returns the same handle, and the temporary
+     buffer is consumed by sx_append, so there is nothing else to free. */
+  sx_t *msg = sx_append(sx_append_cstr(sx_new(), "Hello, "),
+                        sx_new_from_cstr("String X!"));
+
+  printf("%s (%d bytes)\n", sx_buf_mut(msg), sx_len(msg));
+  sx_free(msg);   /* one buffer, one free */
   return 0;
 }
 ```
+
+输出为 `Hello, String X! (16 bytes)`。
 
 编译（手动，或经 pkg-config）：
 

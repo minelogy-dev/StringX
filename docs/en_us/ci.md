@@ -5,9 +5,8 @@ English · [中文](../zh_cn/ci.md)
 # Continuous integration
 
 Changes to `main`, pull requests and manual runs use GitHub Actions. This page
-covers what each workflow verifies, how to reproduce the checks locally, and how
-merge protection ties them together. For the commands themselves — Forge
-bootstrap, `./make` targets, the test harness — see
+covers the workflows, local reproduction and merge protection; for build
+commands, `./make` targets and the test harness see
 [Build, test & package](build-and-test.md).
 
 ## Triggers
@@ -16,11 +15,12 @@ bootstrap, `./make` targets, the test harness — see
 | --- | --- |
 | `push` to `main` | [ci.yml](../../.github/workflows/ci.yml) and [codeql.yml](../../.github/workflows/codeql.yml) |
 | `pull_request` on any branch | `ci.yml` and `codeql.yml` |
-| `workflow_dispatch` (manual run) | `ci.yml` and `codeql.yml` |
+| `pull_request`, path-filtered | [write-safety.yml](../../.github/workflows/write-safety.yml) (`src/sx_core.c`, `tests/write_overflow*`, its script), [search-performance.yml](../../.github/workflows/search-performance.yml) (`src/sx_core.c`, its script), [benchmarks.yml](../../.github/workflows/benchmarks.yml) (`benchmarks/**`), [benchmark-report.yml](../../.github/workflows/benchmark-report.yml) (its workflow file only) |
+| `workflow_dispatch` (manual run) | `ci.yml`, `codeql.yml`, `write-safety.yml`, `search-performance.yml`, `benchmarks.yml`, `benchmark-report.yml` |
 | `schedule` | `codeql.yml` only (weekly) |
 
-The workflows have read-only repository access, except for the CodeQL job's
-permission to publish code-scanning results. Pull-request code never runs via
+Workflows have read-only repository access, except CodeQL's permission to
+publish code-scanning results. Pull-request code never runs via
 `pull_request_target`, and checkout credentials are not persisted.
 
 ## Checks
@@ -32,42 +32,48 @@ permission to publish code-scanning results. Pull-request code never runs via
 | GCC static analysis | `-fanalyzer` checks production translation units; diagnostics fail the job |
 | Workflow and secret checks | Actionlint, ShellCheck, whitespace errors and Gitleaks over the complete Git history, with redacted output |
 | CodeQL (C/C++) | Manual build tracing with `security-and-quality` queries, findings in the Security tab and on pull requests |
+| Write safety and cost | Re-runs the write-overflow regression against the immutable old implementation (a sanitizer failure is required there), runs both fixed configurations with GCC 14 and Clang 19, and compares equal-length write cost with SDS and bstrlib |
+| Search performance | Before/after search benchmark with GCC and Clang for `src/sx_core.c` changes |
+| Audited benchmarks | Reruns the pinned StringX / SDS / bstrlib harness when `benchmarks/` changes |
+| Benchmark results report | Renders a saved benchmark artifact as a report (manual) |
 | CI | A stable required check that fails if any build, analyzer or quality job fails or is cancelled |
 
-GCC analysis uses `-O1 -fno-analyzer-state-merge`: GCC 14's default state
-merging produces spurious allocation/cleanup diagnostics in this code. No
-diagnostic categories are suppressed. An analyzer failure should be
-investigated, not worked around with `continue-on-error`.
+The four audit/benchmark workflows are path-filtered and independent of the
+aggregate `CI` check; they gate merges only if branch protection requires them.
 
-All external Actions use immutable commit SHAs. Dependabot proposes weekly
-GitHub Actions updates. The Actionlint and Gitleaks CLIs have pinned versions
-and SHA-256 checksums in
+GCC analysis uses `-O1 -fno-analyzer-state-merge`: GCC 14's default state
+merging produces spurious allocation/cleanup diagnostics here. No categories
+are suppressed; investigate analyzer failures instead of using
+`continue-on-error`.
+
+External Actions are pinned to immutable commit SHAs; Dependabot proposes
+weekly updates. The Actionlint and Gitleaks CLIs have pinned versions and
+SHA-256 checksums in
 [.github/scripts/install-tools.sh](../../.github/scripts/install-tools.sh);
-update both values together when upgrading them.
+update both together when upgrading.
 
 ## CodeQL
 
-CodeQL is configured for C/C++ with manual build tracing and the
-`security-and-quality` query set. It analyzes the code built by the pinned Forge
-toolchain, publishes findings to the Security tab, and reports them on pull
-requests.
+CodeQL covers C/C++ with manual build tracing and `security-and-quality`
+queries. It analyzes code built by the pinned toolchain, publishes
+findings to the Security tab and on pull requests.
 
-CodeQL also runs every Monday at 11:17 Asia/Shanghai (03:17 UTC). A successful
-job status means the analysis completed; it does **not** mean there are no
-alerts. Use a code-scanning merge rule to enforce alert severity — see
+CodeQL also runs every Monday at 11:17 Asia/Shanghai (03:17 UTC). Success means
+the analysis completed, not that there are no alerts; enforce severity with a
+code-scanning merge rule — see
 [Enable merge protection](#enable-merge-protection).
 
 ## Enable merge protection
 
-Workflow files alone do not enable branch protection; these repository settings
-are a one-time maintainer configuration. After the first successful run, create
-a branch ruleset for `main`:
+Workflow files alone do not enable branch protection; these are one-time
+maintainer settings. After the first successful run, create a branch ruleset
+for `main`:
 
 1. Require pull requests and the `CI` and `CodeQL (C/C++)` status checks.
 2. Require branches to be up to date before merging.
 3. Add "Require code scanning results", select CodeQL, and block high/critical
-   security alerts and error-level quality alerts. Tighten these thresholds
-   after triaging existing findings.
+   security alerts and error-level quality alerts; tighten thresholds after
+   triaging existing findings.
 4. Use the checked-in advanced CodeQL workflow rather than enabling a duplicate
    default-setup scan.
 
@@ -77,8 +83,8 @@ review.
 ## Reproduce locally
 
 Install Linux build dependencies and a C23 compiler (GCC 14+ or Clang 19+).
-Save local `build.conf` changes before running `configure.sh`: it updates the
-compiler selection and appends `sanitize=1` in that file.
+Save local `build.conf` changes before `configure.sh`: it updates the compiler
+selection and appends `sanitize=1`.
 
 ```sh
 CC=gcc bash .github/scripts/configure.sh  # or CC=clang
@@ -86,54 +92,43 @@ CC=gcc bash .github/scripts/check-c.sh
 CC=gcc bash .github/scripts/check-c.sh analyze
 ```
 
-Use GCC for `analyze`. Runtime checks set:
+Use GCC for `analyze`; runtime checks set:
 
 ```sh
 export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
 export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
 ```
 
-The build dependency is Forge commit
-`b6826ba762a1e9e337895e01ee604b943c682d23`, checked out under `.ci-deps/forge`
-in CI and bootstrapped without installing system files. PCRE2 comes from
-Ubuntu's `libpcre2-dev` package.
-
-With a bootstrapped Forge checkout available locally:
+CI pins Forge to a reviewed commit (checked out under `.ci-deps/forge`); both
+workflow files contain the exact pin and setup commands, and the pin must
+be updated in both together. PCRE2 comes from Ubuntu's `libpcre2-dev` package.
+With Forge installed:
 
 ```sh
-export PATH="/path/to/forge/build/output:$PATH"
-export CPATH="/path/to/forge/build/output/include"
 forge .
 ./make
 ./make test -j 2
 ```
 
-CI additionally installs into a temporary prefix, compiles and runs the existing
-regex suite against the **installed shared library** using `pkg-config`, and
-inspects the generated Debian package. This checks public headers, exported
-symbols, package metadata and PCRE2 linkage in addition to source-level
-behavior. The corresponding commands are in `ci.yml`; the layout they exercise
-is documented in [Build, test & package](build-and-test.md).
+The focused audit scripts live in `.github/scripts/` (`check-write-safety.py`,
+`compare-search.py`); `benchmarks/` documents its own harness and rerun steps.
 
-## Pinned Forge commit
-
-Both workflow files check out Forge commit
-`b6826ba762a1e9e337895e01ee604b943c682d23` under `.ci-deps/forge` and bootstrap
-it with `sh .ci-deps/forge/bootstrap.sh --no-test`, without installing system
-files. Update this reviewed pin in **both** workflow files when changing Forge.
-It is intentionally independent of Forge's moving `main` branch and is not
-updated by Dependabot.
+CI also installs into a temporary prefix, compiles and runs the existing regex
+suite against the **installed shared library** via `pkg-config`, and inspects
+the generated Debian `.deb`. This checks public headers, exported symbols,
+package metadata and PCRE2 linkage beyond source-level behavior. Commands are
+in `ci.yml`; the layout is in [Build, test & package](build-and-test.md).
 
 ## Review and failures
 
-Open the failed check for compiler diagnostics, sanitizer stack traces or
-secret-scan locations. Build failures retain dependency and command metadata for
-seven days; the Actions log contains the full build/test output. CodeQL alerts
-include the affected lines and data flow where available.
+Open the failed check for compiler diagnostics, sanitizer traces or secret-scan
+locations. Build failures keep dependency and command metadata for seven days;
+the Actions log has the full output. CodeQL alerts include affected lines and
+data flow where available.
 
-Automation covers mechanical regressions and many common memory-safety bugs.
-Human review should concentrate on requirements, API contracts, ownership,
-architecture and the findings reported by these tools.
+Automation covers mechanical regressions and many memory-safety bugs; human
+review should focus on requirements, API contracts, ownership, architecture and
+tool findings.
 
 ---
 

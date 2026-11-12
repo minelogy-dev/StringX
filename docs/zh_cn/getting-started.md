@@ -4,12 +4,10 @@
 
 # 快速上手
 
-String X 是一个轻量的 C23 字符串库：它把每个字符串视为一段以单个 NUL
-结尾的缓冲区，而它的每一段切片都是一个零拷贝视图。所有缓冲区都按字节长度
-处理，内嵌的 NUL 字节是普通数据，不会被 C 字符串规则截断。公开接口只有
-一个头文件 `<sx.h>` 和一个库 `libstringx`（`-lstringx`）；可选的进阶
-层通过 PCRE2 提供正则表达式。本页带你从一份全新检出的代码走到一个可运行
-的程序。文档描述的是 **v0.5**。
+String X 是一个轻量的 C23 字符串库：每个字符串是一段 NUL 结尾的缓冲区，
+切片是零拷贝视图，全部按字节长度处理（内嵌 NUL 是普通数据）。公开接口只有
+一个头文件 `<sx.h>` 和一个库 `libstringx`（`-lstringx`）；可选的 PCRE2 进阶层
+提供正则表达式。版本：**v0.5**。
 
 ## 环境要求
 
@@ -17,22 +15,21 @@ String X 是一个轻量的 C23 字符串库：它把每个字符串视为一段
 | --- | --- |
 | Linux | 经过测试的平台；构建与测试均面向 Linux |
 | C23 编译器 | GCC 14+ 或 Clang 19+；CI 在 Ubuntu 24.04 上使用 GCC 14 与 Clang 19 |
-| `forge` | `https://github.com/minelogy-dev/forge`；把 `build.c` 编译成本地 `./make` 可执行文件 |
+| `forge` | [github.com/minelogy-dev/forge](https://github.com/minelogy-dev/forge) |
 | `libpcre2-dev` | PCRE2 10.46，8 位 API；构建时需要；库自身会链接 `pcre2-8` |
 | `pkg-config` | 推荐使用者使用；安装包自带 `libstringx.pc` |
 
 ## 从源码构建
 
 ```sh
-forge .        # compile build.c into ./make (re-run whenever build.c changes)
+forge .        # generate ./make
 ./make         # build -> build/output/libstringx.so
 ./make test    # build and run every test under tests/ (ASan + UBSan + LSan)
 ```
 
-`./make` 还会把公开头文件同步到 `build/output/include`。`./make test` 把每个
-`tests/*.c` 当作独立程序运行，全程开启 AddressSanitizer、UBSan 与
-LeakSanitizer（内存检查器）；可以用 `./make test -j 2` 并行执行测试。
-`build.conf` 选择编译器，也是版本号的唯一来源。
+`./make` 会把公开头文件同步到 `build/output/include`；`./make test` 把每个
+`tests/*.c` 当作独立程序在 AddressSanitizer、UBSan 与 LeakSanitizer 下运行
+（`-j 2` 并行）。`build.conf` 选择编译器，也是版本号的唯一来源。
 
 ## 安装
 
@@ -56,8 +53,8 @@ install 目标会先构建，然后复制产物：
 cc app.c $(pkg-config --cflags --libs libstringx) -o app
 ```
 
-如果前缀不在默认搜索路径中，请让 pkg-config 找到已安装的元数据；对于非系统
-前缀，还要设置运行时库路径：
+前缀不在默认搜索路径时，设置 `PKG_CONFIG_PATH` 让 pkg-config 找到元数据，
+并设置运行时库路径：
 
 ```sh
 export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig"
@@ -71,8 +68,8 @@ LD_LIBRARY_PATH="$HOME/.local/lib" ./app
 cc app.c -I<prefix>/include -L<prefix>/lib -lstringx -o app
 ```
 
-你只需要链接 `-lstringx`：`libstringx` 自身已链接 `pcre2-8`，因此无需额外的
-库参数。但共享库在运行时需要系统中存在 `libpcre2-8`。
+只需链接 `-lstringx`：`libstringx` 已链接 `pcre2-8`，无需额外库参数，但运行时
+需要 `libpcre2-8`。
 
 ### Debian 软件包
 
@@ -81,28 +78,28 @@ cc app.c -I<prefix>/include -L<prefix>/lib -lstringx -o app
 sudo apt install ./build/deb/libstringx_0.5_amd64.deb
 ```
 
-`gen_deb` 会生成 `build/deb/libstringx_<version>_<arch>.deb`；版本号来自
-`build.conf`（去掉前缀 `v`），架构名来自 `uname -m`（`x86_64` 映射为
-`amd64`，`aarch64` 映射为 `arm64`）。软件包依赖 `libc6` 与 `libpcre2-8-0`。
+`gen_deb` 生成 `build/deb/libstringx_<version>_<arch>.deb`：版本号取自
+`build.conf` 并去掉前缀 `v`，架构名取自 `uname -m`（`x86_64` → `amd64`，
+`aarch64` → `arm64`）；依赖 `libc6` 与 `libpcre2-8-0`。
 
 ## Hello, String X
 
-这是 README 中的快速上手程序。它把一个 C 字符串复制进自有缓冲区，找到第一个
-逗号，把它之前的文本复制到第二个自有缓冲区并打印出来。两个缓冲区都用
-`sx_free` 释放。
+README 中的快速上手程序：每次修改都返回同一句柄，因此整条链是一个表达式；
+`sx_append` 消费临时缓冲区，结果只需一次 `sx_free`。扩容后句柄仍然有效，
+且每次调用后缓冲区都以 NUL 结尾。
 
 ```c
 #include <sx.h>
 #include <stdio.h>
 
 int main(void) {
-  sx_t *msg = sx_new_from_cstr("hello, world");
-  size_t at = sx_find_cstr(msg, ", ");
-  sx_t *hi = sx_substr(msg, 0, at);
-  fwrite(sx_buf_mut(hi), 1, (size_t)sx_len(hi), stdout);
-  putchar('\n');                        /* hello */
-  sx_free(hi);
-  sx_free(msg);
+  /* One expression: every call returns the same handle, and the temporary
+     buffer is consumed by sx_append, so there is nothing else to free. */
+  sx_t *msg = sx_append(sx_append_cstr(sx_new(), "Hello, "),
+                        sx_new_from_cstr("String X!"));
+
+  printf("%s (%d bytes)\n", sx_buf_mut(msg), sx_len(msg));
+  sx_free(msg);   /* one buffer, one free */
   return 0;
 }
 ```
@@ -115,7 +112,7 @@ cc hello.c $(pkg-config --cflags --libs libstringx) -o hello
 ```
 
 ```text
-hello
+Hello, String X! (16 bytes)
 ```
 
 在安装之前，也可以直接使用源码树的构建输出：
@@ -127,8 +124,7 @@ LD_LIBRARY_PATH=build/output ./hello
 
 ## 十分钟概览
 
-用户最常做的五件事，每个配一个小程序。所有示例都是完整程序，编译方式与上面的
-`hello.c` 相同。
+用户最常做的五件事，每个一个完整程序，编译方式同 `hello.c`。
 
 ### 创建缓冲区
 
@@ -291,7 +287,7 @@ replaced: bob at example.com, alice at example.org
 | [API 参考：查找、比较与分割](api-search.md) | `sx_find*`、`sx_rfind*`、`sx_cmp*`、`sx_split` |
 | [正则表达式](regex.md) | `sx_reg_*` 的匹配、替换与分割家族 |
 | [设计与内部实现](design.md) | 数据布局、扩容策略、算法与限制 |
-| [构建、测试与打包](build-and-test.md) | Forge 目标、测试框架、安装 |
+| [构建、测试与打包](build-and-test.md) | 构建目标、测试框架、安装 |
 | [贡献指南](contributing.md) | 工作流程、代码风格、测试、许可 |
 | [持续集成](ci.md) | 工作流、必需检查、CodeQL |
 
