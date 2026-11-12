@@ -42,6 +42,9 @@ sx_view_t sx_view(const sx_t *h);
 sx_t *sx_append(sx_t *self, sx_t *owned);
 sx_t *sx_append_cstr(sx_t *self, const char *s);
 sx_t *sx_append_view(sx_t *self, sx_view_t v);
+/* Writes return NULL if the resulting length cannot be reserved, including
+   unsigned overflow. Overflow leaves self unchanged; sx_write still consumes
+   its owned input on failure. */
 sx_t *sx_write(sx_t *self, size_t idx, sx_t *owned);
 sx_t *sx_write_cstr(sx_t *self, size_t idx, const char *s);
 sx_t *sx_write_view(sx_t *self, size_t idx, sx_view_t v);

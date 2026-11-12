@@ -91,11 +91,14 @@ SYMBOL_PUBLIC sx_t *sx_append_view(sx_t *self, sx_view_t v) {
 }
 static inline sx_t *write(sx_t *self, size_t idx, const char *str, size_t len,
                           void *(*copy)(void *, const void *, size_t)) {
-  if (sx__reserve(self->ref, idx + len))
+  if (len > SIZE_MAX - idx)
+    return NULL;
+  const size_t end = idx + len;
+  if (sx__reserve(self->ref, end))
     return NULL;
   copy(self->ref->ptr + idx, str, len * sizeof(char));
-  if (idx + len > self->ref->len)
-    self->ref->len = idx + len;
+  if (end > self->ref->len)
+    self->ref->len = end;
   self->ref->ptr[self->ref->len] = '\0'; /* keep the invariant */
   return self;
 }
@@ -112,6 +115,9 @@ SYMBOL_PUBLIC sx_t *sx_write_cstr(sx_t *self, size_t idx, const char *s) {
   return write(self, idx, s, strlen(s), memcpy);
 }
 SYMBOL_PUBLIC sx_t *sx_write_view(sx_t *self, size_t idx, sx_view_t v) {
+  /* Reject overflow before the alias-preserving pre-reserve can mutate self. */
+  if (v.len > SIZE_MAX - idx)
+    return NULL;
   if (sx__reserve(self->ref, idx + v.len))
     return NULL;
   if (self->ref == v.ref)
