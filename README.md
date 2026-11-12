@@ -13,6 +13,12 @@ To use it you only need:
 
 and link `-lstringx` — one header, one library.
 
+**Documentation:** the full manual lives in [`docs/`](docs/README.md) —
+[Getting started](docs/en_us/getting-started.md), [User guide](docs/en_us/guide.md),
+[API reference](docs/en_us/api-buffer.md), [Regex](docs/en_us/regex.md),
+[Design](docs/en_us/design.md), [Build & test](docs/en_us/build-and-test.md).
+The Chinese edition is under [`docs/zh_cn/`](docs/zh_cn/README.md).
+
 ## Design
 
 - **Buffer model.** Every `sx_t` owns a single NUL-terminated buffer:
@@ -23,18 +29,18 @@ and link `-lstringx` — one header, one library.
 - **Views.** `sx_view_t {ref, offset, len}` aliases a slice of a buffer with
   **no copy and no modification** of the original.  Many APIs return views
   (the `ref == NULL` sentinel marks "none").
-- **Layers.** `sx_core.h` provides the core buffer, view, search, compare
-  and split operations (reached through `sx.h`); the advanced layer adds
-  regex through **PCRE2** (`\d \w \b …` are ASCII in 8-bit non-UTF mode).
+- **Layers.** `sx_core.h` provides the core buffer, view, search and
+  compare operations (reached through `sx.h`); the advanced layer adds
+  splitting (`sx_split`) and regex through **PCRE2** (`\d \w \b …` are
+  ASCII in 8-bit non-UTF mode).
 - **Deterministic contracts.** Every function documents its exact behavior
-  boundaries in `sx.h`; invalid inputs never crash — they return a
-  documented not-found/error value.
+  boundaries in `sx.h`: documented miss/error cases return sentinel values,
+  and anything outside those boundaries is out of contract.
 
 ## Requirements
 
 - A C23 compiler (GCC and Clang), Linux
-- The `forge` build tool to build from source (https://github.com/minelogy-dev/forge —
-  a custom build system; the tool compiles `build.c` into a local `./make` entry)
+- [Forge](https://github.com/minelogy-dev/forge) to build from source
 - `libpcre2-dev` (PCRE2 8-bit) — the regex layer's dependency; the shared
   library links `pcre2-8` itself, so consumers only need `-lstringx`
 - `pkg-config` (or `pkgconf`) recommended for consumers — the installed
@@ -43,28 +49,37 @@ and link `-lstringx` — one header, one library.
 ## Build
 
 ```sh
-forge .        # compile build.c into ./make (re-run whenever build.c changes)
+forge .        # generate ./make
 ./make         # build -> build/output/libstringx.so (+ headers at build/output/include)
 ./make test    # build and run every test under tests/ (ASan + UBSan)
 ```
 
+See [Build, test & package](docs/en_us/build-and-test.md) for installation,
+packaging and the test harness.
+
 ## Quick start
+
+Edits return the handle they were given, so the whole chain is one
+expression: `sx_append` consumes its `sx_t *` argument, and one `sx_free`
+releases everything.
 
 ```c
 #include <sx.h>
 #include <stdio.h>
 
 int main(void) {
-  sx_t *msg = sx_new_from_cstr("hello, world");
-  size_t at = sx_find_cstr(msg, ", ");
-  sx_t *hi = sx_substr(msg, 0, at);
-  fwrite(sx_buf_mut(hi), 1, (size_t)sx_len(hi), stdout);
-  putchar('\n');                        /* hello */
-  sx_free(hi);
-  sx_free(msg);
+  /* One expression: every call returns the same handle, and the temporary
+     buffer is consumed by sx_append, so there is nothing else to free. */
+  sx_t *msg = sx_append(sx_append_cstr(sx_new(), "Hello, "),
+                        sx_new_from_cstr("String X!"));
+
+  printf("%s (%d bytes)\n", sx_buf_mut(msg), sx_len(msg));
+  sx_free(msg);   /* one buffer, one free */
   return 0;
 }
 ```
+
+It prints `Hello, String X! (16 bytes)`.
 
 Compile with (manually, or via pkg-config):
 
@@ -116,10 +131,14 @@ Contract highlights (full detail in `sx.h`):
 | Split | `sx_split(sep)` |
 | Regex | `sx_reg_compile`, `sx_reg_free`, `sx_reg_is_match`, `sx_reg_match`, `sx_reg_match_all`, `sx_reg_replace`, `sx_reg_replace_first`, `sx_reg_split` |
 
+This table is an index only: [API reference: buffers & views](docs/en_us/api-buffer.md)
+and [API reference: search, compare & split](docs/en_us/api-search.md) document
+every function's exact contract.
+
 ## Tests
 
 Pull requests run compiler, sanitizer, static-analysis and secret checks.
-See [Continuous integration](docs/CI.md) for coverage and merge-protection setup.
+See [Continuous integration](docs/en_us/ci.md) for coverage and merge-protection setup.
 
 ```sh
 ./make test
